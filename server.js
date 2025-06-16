@@ -4,16 +4,12 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const connectDB = require("./config/db");
 const mainRoutes = require("./routes");
-
 dotenv.config();
 const app = express();
 app.use(cors());
 app.use(express.json());
-
 connectDB();
-
-app.use("/api", mainRoutes); // endi barcha route'lar /api orqali ketadi
-
+app.use("/api", mainRoutes);
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server ${PORT}-portda ishlayapti`);

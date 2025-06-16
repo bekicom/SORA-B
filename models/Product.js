@@ -24,7 +24,7 @@ const productSchema = new mongoose.Schema(
     },
     image: {
       type: String,
-      default: "",
+      default: "", // ⬅️ optional: bo‘sh qoldirilsa ham bo‘ladi
     },
     is_active: {
       type: Boolean,
@@ -33,7 +33,17 @@ const productSchema = new mongoose.Schema(
   },
   {
     timestamps: true,
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
   }
 );
+
+// 🔄 virtual: kategoriya ma'lumotlarini avtomatik qo‘shish (ixtiyoriy)
+productSchema.virtual("category", {
+  ref: "Category",
+  localField: "category_id",
+  foreignField: "_id",
+  justOne: true,
+});
 
 module.exports = mongoose.model("Product", productSchema);

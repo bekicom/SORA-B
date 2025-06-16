@@ -5,6 +5,12 @@ const createProduct = async (req, res) => {
   try {
     const { title, price, unit, category_id, image } = req.body;
 
+    if (!title || !price || !unit || !category_id) {
+      return res
+        .status(400)
+        .json({ message: "Barcha maydonlar to‘ldirilishi kerak" });
+    }
+
     const product = await Product.create({
       title,
       price,
@@ -26,10 +32,10 @@ const createProduct = async (req, res) => {
 const getAllProducts = async (req, res) => {
   try {
     const products = await Product.find()
-      .populate("category_id", "title") // faqat kategoriyaning nomini olib kelish
+      .populate("category_id", "title")
       .sort({ createdAt: -1 });
 
-    res.json(products);
+    res.status(200).json({ products });
   } catch (error) {
     res.status(500).json({ message: "Server xatoligi", error: error.message });
   }
@@ -40,6 +46,7 @@ const updateProduct = async (req, res) => {
   try {
     const updated = await Product.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
+      runValidators: true,
     });
 
     if (!updated) {
