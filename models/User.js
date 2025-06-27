@@ -3,25 +3,34 @@ const bcrypt = require("bcryptjs");
 
 const userSchema = new mongoose.Schema(
   {
-    first_name: { type: String, required: true },
-    last_name: { type: String },
+    first_name: { type: String, required: true, trim: true },
+    last_name: { type: String, required: true, trim: true },
     role: {
       type: String,
-      enum: ["admin", "kassir", "ofitsiant"],
-      default: "ofitsiant",
+      enum: [
+        "manager",
+        "afitsant",
+        "xoctest",
+        "kassir",
+        "buxgalter",
+        "barmen",
+        "povir",
+        "paner",
+      ],
+      default: "afitsant",
     },
     password: { type: String, required: true },
-    card_code: { type: String }, // optional RFID card
-    user_code: { type: String, unique: true },
-    permissions: { type: Object, default: {} }, // huquqlar (prava)
-    departments: { type: [String], default: [] }, // bo‘limlar
+    is_active: { type: Boolean, default: true },
+    permissions: {
+      type: [String],
+      enum: ["chek", "atkaz", "hisob"],
+      default: [],
+    },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
-// Parol hash qilish (register/update paytida)
+
 userSchema.pre("save", async function (next) {
   if (!this.isModified("password")) return next();
   const salt = await bcrypt.genSalt(10);
@@ -29,7 +38,6 @@ userSchema.pre("save", async function (next) {
   next();
 });
 
-// Parolni solishtirish
 userSchema.methods.matchPassword = async function (enteredPassword) {
   return await bcrypt.compare(enteredPassword, this.password);
 };

@@ -49,8 +49,8 @@ router.get("/auth/me", authMiddleware, getMe);
 
 // ==================== USERS ====================
 router.post("/users", authMiddleware, createUser);
-router.get("/users",  getAllUsers); // Admin uchun barcha foydalanuvchilarni olish
-router.post("/users", authMiddleware, createUser); 
+router.get("/users", getAllUsers); // Admin uchun barcha foydalanuvchilarni olish
+router.post("/users", authMiddleware, createUser);
 router.put("/users/:id", authMiddleware, updateUser);
 router.delete("/users/:id", authMiddleware, deleteUser);
 router.post("/users", authMiddleware, onlyAdmin, createUser);

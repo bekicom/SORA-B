@@ -14,11 +14,14 @@ exports.createUser = async (req, res) => {
   } = req.body;
 
   try {
-    const existing = await User.findOne({ user_code });
-    if (existing) {
-      return res
-        .status(400)
-        .json({ message: "Bu user_code allaqachon mavjud" });
+    // Faqat user_code bo‘yicha tekshiruv
+    if (user_code) {
+      const existing = await User.findOne({ user_code });
+      if (existing) {
+        return res
+          .status(400)
+          .json({ message: "Bu user_code allaqachon mavjud" });
+      }
     }
 
     const newUser = await User.create({
@@ -32,13 +35,17 @@ exports.createUser = async (req, res) => {
       departments,
     });
 
-    res.status(201).json({ message: "Foydalanuvchi yaratildi", user: newUser });
+    res.status(201).json({
+      message: "Foydalanuvchi yaratildi",
+      user: { ...newUser._doc, password: undefined },
+    });
   } catch (error) {
     console.error("❌ createUser xatolik:", error);
     res.status(500).json({ message: "Server xatoligi", error: error.message });
   }
 };
 
+// @desc    Barcha foydalanuvchilarni olish
 exports.getAllUsers = async (req, res) => {
   try {
     const users = await User.find().select("-password");
@@ -48,12 +55,18 @@ exports.getAllUsers = async (req, res) => {
   }
 };
 
-
-
 // @desc    Foydalanuvchini yangilash
 exports.updateUser = async (req, res) => {
   const { id } = req.params;
-  const { first_name, last_name, role, departments, permissions } = req.body;
+  const {
+    first_name,
+    last_name,
+    role,
+    departments,
+    permissions,
+    user_code,
+    card_code,
+  } = req.body;
 
   try {
     const user = await User.findById(id);
@@ -61,14 +74,20 @@ exports.updateUser = async (req, res) => {
       return res.status(404).json({ message: "Foydalanuvchi topilmadi" });
     }
 
-    user.first_name = first_name || user.first_name;
-    user.last_name = last_name || user.last_name;
-    user.role = role || user.role;
-    user.departments = departments || user.departments;
-    user.permissions = permissions || user.permissions;
+    user.first_name = first_name ?? user.first_name;
+    user.last_name = last_name ?? user.last_name;
+    user.role = role ?? user.role;
+    user.departments = departments ?? user.departments;
+    user.permissions = permissions ?? user.permissions;
+    user.user_code = user_code ?? user.user_code;
+    user.card_code = card_code ?? user.card_code;
 
     await user.save();
-    res.json({ message: "Foydalanuvchi yangilandi", user });
+
+    res.json({
+      message: "Foydalanuvchi yangilandi",
+      user: { ...user._doc, password: undefined },
+    });
   } catch (error) {
     console.error("❌ updateUser xatolik:", error);
     res
