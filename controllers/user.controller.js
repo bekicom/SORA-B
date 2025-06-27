@@ -1,5 +1,7 @@
 const User = require("../models/User");
 
+const validPermissions = ["chek", "atkaz", "hisob"];
+
 // @desc    Admin tomonidan foydalanuvchi yaratish
 exports.createUser = async (req, res) => {
   const {
@@ -9,12 +11,11 @@ exports.createUser = async (req, res) => {
     role,
     user_code,
     card_code,
-    permissions,
+    permissions = [],
     departments,
   } = req.body;
 
   try {
-    // Faqat user_code bo‘yicha tekshiruv
     if (user_code) {
       const existing = await User.findOne({ user_code });
       if (existing) {
@@ -24,6 +25,11 @@ exports.createUser = async (req, res) => {
       }
     }
 
+    // ✅ Ruxsatlar tekshiruvi (faqat valid bo‘lishi kerak)
+    const filteredPermissions = permissions.filter((p) =>
+      validPermissions.includes(p)
+    );
+
     const newUser = await User.create({
       first_name,
       last_name,
@@ -31,7 +37,7 @@ exports.createUser = async (req, res) => {
       role,
       user_code,
       card_code,
-      permissions,
+      permissions: filteredPermissions,
       departments,
     });
 
@@ -74,11 +80,26 @@ exports.updateUser = async (req, res) => {
       return res.status(404).json({ message: "Foydalanuvchi topilmadi" });
     }
 
+    // ✅ Agar user_code o‘zgartirilayotgan bo‘lsa, boshqalarda mavjud emasligiga ishonch hosil qilish
+    if (user_code && user_code !== user.user_code) {
+      const existing = await User.findOne({ user_code });
+      if (existing) {
+        return res
+          .status(400)
+          .json({ message: "Bu user_code allaqachon mavjud" });
+      }
+    }
+
+    // ✅ permissions filtr qilish
+    const filteredPermissions = Array.isArray(permissions)
+      ? permissions.filter((p) => validPermissions.includes(p))
+      : user.permissions;
+
     user.first_name = first_name ?? user.first_name;
     user.last_name = last_name ?? user.last_name;
     user.role = role ?? user.role;
     user.departments = departments ?? user.departments;
-    user.permissions = permissions ?? user.permissions;
+    user.permissions = filteredPermissions;
     user.user_code = user_code ?? user.user_code;
     user.card_code = card_code ?? user.card_code;
 
