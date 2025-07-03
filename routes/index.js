@@ -3,10 +3,10 @@ const router = express.Router();
 const authMiddleware = require("../middlewares/auth.middleware");
 const upload = require("../middlewares/upload.middleware");
 const { onlyAdmin } = require("../middlewares/role.middleware");
-// 🔐 Auth controllers
+
+// ==================== CONTROLLERS ====================
 const { login, register, getMe } = require("../controllers/auth.controller");
 
-// 👤 User controllers
 const {
   getAllUsers,
   updateUser,
@@ -14,7 +14,6 @@ const {
   createUser,
 } = require("../controllers/user.controller");
 
-// 🍽 Table controllers
 const {
   createTable,
   getTables,
@@ -22,7 +21,6 @@ const {
   deleteTable,
 } = require("../controllers/table.controller");
 
-// 📂 Category controllers
 const {
   createCategory,
   getCategories,
@@ -30,17 +28,19 @@ const {
   deleteCategory,
 } = require("../controllers/category.controller");
 
-// 🍔 Product controllers
 const {
-  createProduct,
-  getAllProducts,
-  updateProduct,
-  deleteProduct,
-} = require("../controllers/product.controller");
+  createDepartment,
+  getAllDepartments,
+  updateDepartment,
+  deleteDepartment,
+} = require("../controllers/department.controller");
+
 const {
-  createOrder,
-  getAllOrders,
-} = require("../controllers/order.controller");
+  createFood,
+  getAllFoods,
+  updateFood,
+  deleteFood,
+} = require("../controllers/food.controller");
 
 // ==================== AUTH ====================
 router.post("/auth/login", login);
@@ -48,12 +48,11 @@ router.post("/auth/register", register);
 router.get("/auth/me", authMiddleware, getMe);
 
 // ==================== USERS ====================
-router.post("/users", authMiddleware, createUser);
-router.get("/users", getAllUsers); // Admin uchun barcha foydalanuvchilarni olish
-router.post("/users", authMiddleware, createUser);
+router.post("/users", authMiddleware, onlyAdmin, createUser);
+router.get("/users", authMiddleware, getAllUsers);
 router.put("/users/:id", authMiddleware, updateUser);
 router.delete("/users/:id", authMiddleware, deleteUser);
-router.post("/users", authMiddleware, onlyAdmin, createUser);
+
 // ==================== TABLES ====================
 router.post("/tables/create", authMiddleware, createTable);
 router.get("/tables/list", authMiddleware, getTables);
@@ -66,11 +65,11 @@ router.get("/categories/list", authMiddleware, getCategories);
 router.put("/categories/update/:id", authMiddleware, updateCategory);
 router.delete("/categories/delete/:id", authMiddleware, deleteCategory);
 
-// ==================== PRODUCTS ====================
-router.post("/products/create", authMiddleware, createProduct);
-router.get("/products/list", authMiddleware, getAllProducts);
-router.put("/products/update/:id", authMiddleware, updateProduct);
-router.delete("/products/delete/:id", authMiddleware, deleteProduct);
+// ==================== FOODS (TAOMLAR) ====================
+router.post("/foods/create", authMiddleware, createFood);
+router.get("/foods/list", authMiddleware, getAllFoods);
+router.put("/foods/update/:id", authMiddleware, updateFood);
+router.delete("/foods/delete/:id", authMiddleware, deleteFood);
 
 // ==================== IMAGE UPLOAD ====================
 router.post("/upload", upload.single("image"), (req, res) => {
@@ -83,8 +82,10 @@ router.post("/upload", upload.single("image"), (req, res) => {
   res.status(200).json({ imageUrl });
 });
 
-// ==================== ORDERS ====================
-router.post("/orders/create", authMiddleware, createOrder); // ofitsiant
-router.get("/orders/list", authMiddleware, getAllOrders); // admin
+// ==================== DEPARTMENTS ====================
+router.post("/departments/create", authMiddleware, createDepartment);
+router.get("/departments/list", authMiddleware, getAllDepartments);
+router.put("/departments/update/:id", authMiddleware, updateDepartment);
+router.delete("/departments/delete/:id", authMiddleware, deleteDepartment);
 
 module.exports = router;
