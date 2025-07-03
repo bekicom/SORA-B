@@ -12,7 +12,6 @@ const createFood = async (req, res) => {
         .json({ message: "Barcha maydonlar to‘ldirilishi kerak" });
     }
 
-    // 🔍 Otdel orqali skladni olish
     const department = await Department.findById(department_id);
     if (!department) {
       return res.status(404).json({ message: "Bo‘lim (otdel) topilmadi" });
@@ -23,11 +22,11 @@ const createFood = async (req, res) => {
       price,
       category,
       department_id,
-      warehouse: department.warehouse, // avtomatik
+      warehouse: department.warehouse,
     });
 
     res.status(201).json({
-      message: "Taom yaratildi",
+      message: "Taom muvaffaqiyatli yaratildi",
       food,
     });
   } catch (error) {
@@ -40,6 +39,7 @@ const getAllFoods = async (req, res) => {
   try {
     const foods = await Food.find()
       .populate("department_id", "title warehouse")
+      .populate("category", "title") // ← Kategoriya nomini ham olib keladi
       .sort({ createdAt: -1 });
 
     res.status(200).json({ foods });
@@ -73,19 +73,16 @@ const updateFood = async (req, res) => {
         department_id,
         warehouse: department.warehouse,
       },
-      {
-        new: true,
-        runValidators: true,
-      }
+      { new: true, runValidators: true }
     );
 
     if (!updated) {
       return res.status(404).json({ message: "Taom topilmadi" });
     }
 
-    res.json({ message: "Taom yangilandi", food: updated });
+    res.status(200).json({ message: "Taom yangilandi", food: updated });
   } catch (error) {
-    res.status(500).json({ message: "Xatolik", error: error.message });
+    res.status(500).json({ message: "Server xatoligi", error: error.message });
   }
 };
 
@@ -98,9 +95,9 @@ const deleteFood = async (req, res) => {
       return res.status(404).json({ message: "Taom topilmadi" });
     }
 
-    res.json({ message: "Taom o‘chirildi" });
+    res.status(200).json({ message: "Taom o‘chirildi" });
   } catch (error) {
-    res.status(500).json({ message: "Xatolik", error: error.message });
+    res.status(500).json({ message: "Server xatoligi", error: error.message });
   }
 };
 

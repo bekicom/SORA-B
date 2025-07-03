@@ -1,4 +1,4 @@
-const mongoose = require("mongoose");
+const mongoose = require("mongoose"); // ✅ MUHIM
 
 const foodSchema = new mongoose.Schema(
   {
@@ -14,6 +14,7 @@ const foodSchema = new mongoose.Schema(
     },
     category: {
       type: mongoose.Schema.Types.ObjectId,
+      ref: "Category", // ✅ ref qo‘shildi
       required: [true, "Kategoriya majburiy"],
       trim: true,
     },
@@ -23,9 +24,7 @@ const foodSchema = new mongoose.Schema(
       required: [true, "Bo‘lim ID majburiy"],
     },
     warehouse: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "Warehouse", // agar sizda Warehouse modeli mavjud bo‘lsa
-      required: [true, "Sklad avtomatik bo‘lsa-da, saqlanishi shart"],
+      type: String,
     },
   },
   {

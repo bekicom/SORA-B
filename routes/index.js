@@ -49,7 +49,7 @@ router.get("/auth/me", authMiddleware, getMe);
 
 // ==================== USERS ====================
 router.post("/users", authMiddleware, onlyAdmin, createUser);
-router.get("/users", authMiddleware, getAllUsers);
+router.get("/users",  getAllUsers);
 router.put("/users/:id", authMiddleware, updateUser);
 router.delete("/users/:id", authMiddleware, deleteUser);
 

@@ -1,62 +1,75 @@
 const Category = require("../models/Category");
 
-// ➕ Yaratish
+// ➕ Kategoriya yaratish
 const createCategory = async (req, res) => {
   try {
     const { title } = req.body;
 
-    const exists = await Category.findOne({ title });
-    if (exists) {
-      return res.status(400).json({ message: "Bu nomli kategoriya mavjud" });
+    // Tekshir: shu nomli kategoriya mavjudmi
+    const existing = await Category.findOne({ title });
+    if (existing) {
+      return res
+        .status(400)
+        .json({ message: "Bu nomli kategoriya allaqachon mavjud" });
     }
 
-    const category = await Category.create({ title });
-    res.status(201).json({ message: "Kategoriya yaratildi", category });
+    const newCategory = await Category.create({ title });
+    res.status(201).json({
+      message: "Kategoriya muvaffaqiyatli yaratildi",
+      category: newCategory,
+    });
   } catch (error) {
-    res.status(500).json({ message: "Xatolik", error: error.message });
+    res.status(500).json({ message: "Serverda xatolik", error: error.message });
   }
 };
 
-// 📋 Ro‘yxat
+// 📋 Barcha kategoriyalar ro'yxati
 const getCategories = async (req, res) => {
   try {
     const categories = await Category.find().sort({ createdAt: -1 });
-    res.json(categories);
+    res.status(200).json(categories);
   } catch (error) {
-    res.status(500).json({ message: "Xatolik", error: error.message });
+    res.status(500).json({ message: "Serverda xatolik", error: error.message });
   }
 };
 
-// 📝 Yangilash
+// 📝 Kategoriya yangilash
 const updateCategory = async (req, res) => {
   try {
-    const category = await Category.findByIdAndUpdate(req.params.id, req.body, {
+    const updated = await Category.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
+      runValidators: true,
     });
 
-    if (!category)
+    if (!updated) {
       return res.status(404).json({ message: "Kategoriya topilmadi" });
+    }
 
-    res.json({ message: "Kategoriya yangilandi", category });
+    res.status(200).json({
+      message: "Kategoriya yangilandi",
+      category: updated,
+    });
   } catch (error) {
-    res.status(500).json({ message: "Xatolik", error: error.message });
+    res.status(500).json({ message: "Serverda xatolik", error: error.message });
   }
 };
 
-// ❌ O‘chirish
+// ❌ Kategoriya o‘chirish
 const deleteCategory = async (req, res) => {
   try {
     const deleted = await Category.findByIdAndDelete(req.params.id);
 
-    if (!deleted)
+    if (!deleted) {
       return res.status(404).json({ message: "Kategoriya topilmadi" });
+    }
 
-    res.json({ message: "Kategoriya o‘chirildi" });
+    res.status(200).json({ message: "Kategoriya o‘chirildi" });
   } catch (error) {
-    res.status(500).json({ message: "Xatolik", error: error.message });
+    res.status(500).json({ message: "Serverda xatolik", error: error.message });
   }
 };
 
+// ✅ Export
 module.exports = {
   createCategory,
   getCategories,
