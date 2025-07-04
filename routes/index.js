@@ -41,6 +41,13 @@ const {
   updateFood,
   deleteFood,
 } = require("../controllers/food.controller");
+const {
+  createOrder,
+  getOrdersByTable,
+  updateOrderStatus,
+  deleteOrder,
+} = require("../controllers/order.controller");
+
 
 // ==================== AUTH ====================
 router.post("/auth/login", login);
@@ -88,4 +95,10 @@ router.get("/departments/list", authMiddleware, getAllDepartments);
 router.put("/departments/update/:id", authMiddleware, updateDepartment);
 router.delete("/departments/delete/:id", authMiddleware, deleteDepartment);
 
+
+// ==================== ORDERS ====================
+router.post("/orders/create", authMiddleware, createOrder);
+router.get("/orders/table/:tableId", authMiddleware, getOrdersByTable);
+router.put("/orders/status/:orderId", authMiddleware, updateOrderStatus);
+router.delete("/orders/delete/:orderId", authMiddleware, deleteOrder);
 module.exports = router;
