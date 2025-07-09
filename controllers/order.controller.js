@@ -81,3 +81,54 @@ exports.deleteOrder = async (req, res) => {
     res.status(500).json({ message: "Zakaz o‘chirishda xatolik" });
   }
 };
+// orderController.js
+exports.getBusyTables = async (req, res) => {
+  try {
+    const orders = await Order.find({ status: { $in: ["pending", "preparing"] } });
+    const busyTableIds = orders.map((o) => o.table_id.toString());
+    res.json(busyTableIds);
+  } catch (err) {
+    res.status(500).json({ message: "Stollarni olishda xatolik" });
+  }
+};
+
+ exports.getMyPendingOrders = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const pendingOrders = await Order.find({
+      user_id: userId,
+      status: "pending",
+    }).sort({ createdAt: -1 });
+
+    res.status(200).json(pendingOrders);
+  } catch (error) {
+    console.error("Pending orders error:", error);
+    res.status(500).json({ message: "Serverda xatolik yuz berdi" });
+  }
+};
+
+// ✅ Zakazni yopish
+exports.closeOrder = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+
+    const order = await Order.findById(orderId);
+    if (!order) {
+      return res.status(404).json({ message: "Zakaz topilmadi" });
+    }
+
+    if (order.status === "closed") {
+      return res.status(400).json({ message: "Zakaz allaqachon yopilgan" });
+    }
+
+    order.status = "closed";
+    order.closedAt = new Date(); // ixtiyoriy: yopilgan vaqt
+    await order.save();
+
+    res.status(200).json({ message: "Zakaz yopildi", order });
+  } catch (err) {
+    console.error("Zakaz yopishda xatolik:", err);
+    res.status(500).json({ message: "Zakaz yopishda server xatoligi" });
+  }
+};

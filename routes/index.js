@@ -46,8 +46,10 @@ const {
   getOrdersByTable,
   updateOrderStatus,
   deleteOrder,
+  getBusyTables,
+  getMyPendingOrders,
+  closeOrder,
 } = require("../controllers/order.controller");
-
 
 // ==================== AUTH ====================
 router.post("/auth/login", login);
@@ -56,7 +58,7 @@ router.get("/auth/me", authMiddleware, getMe);
 
 // ==================== USERS ====================
 router.post("/users", authMiddleware, onlyAdmin, createUser);
-router.get("/users",  getAllUsers);
+router.get("/users", getAllUsers);
 router.put("/users/:id", authMiddleware, updateUser);
 router.delete("/users/:id", authMiddleware, deleteUser);
 
@@ -95,10 +97,13 @@ router.get("/departments/list", authMiddleware, getAllDepartments);
 router.put("/departments/update/:id", authMiddleware, updateDepartment);
 router.delete("/departments/delete/:id", authMiddleware, deleteDepartment);
 
-
 // ==================== ORDERS ====================
 router.post("/orders/create", authMiddleware, createOrder);
 router.get("/orders/table/:tableId", authMiddleware, getOrdersByTable);
 router.put("/orders/status/:orderId", authMiddleware, updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, deleteOrder);
+router.get("/orders/busy-tables", authMiddleware,getBusyTables);
+router.get("/orders/my-pending", authMiddleware,getMyPendingOrders);
+router.put("/close/:orderId",authMiddleware,     closeOrder);
+
 module.exports = router;
