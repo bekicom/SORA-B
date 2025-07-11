@@ -113,6 +113,8 @@ exports.closeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
 
+    console.log("🔁 Zakaz yopilmoqda, orderId:", orderId); // 👈 log qo‘shildi
+
     const order = await Order.findById(orderId);
     if (!order) {
       return res.status(404).json({ message: "Zakaz topilmadi" });
@@ -123,12 +125,15 @@ exports.closeOrder = async (req, res) => {
     }
 
     order.status = "closed";
-    order.closedAt = new Date(); // ixtiyoriy: yopilgan vaqt
+    order.closedAt = new Date();
     await order.save();
+
+    console.log("✅ Zakaz yopildi:", order._id); // 👈 log qo‘shildi
 
     res.status(200).json({ message: "Zakaz yopildi", order });
   } catch (err) {
-    console.error("Zakaz yopishda xatolik:", err);
+    console.error("❌ Zakaz yopishda xatolik:", err); // 👈 bu log juda muhim
     res.status(500).json({ message: "Zakaz yopishda server xatoligi" });
   }
 };
+

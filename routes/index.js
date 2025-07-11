@@ -50,6 +50,12 @@ const {
   getMyPendingOrders,
   closeOrder,
 } = require("../controllers/order.controller");
+const {
+  createPrinter,
+  getPrinters,
+  updatePrinter,
+  deletePrinter,
+} = require("../controllers/printer.controller");
 
 // ==================== AUTH ====================
 router.post("/auth/login", login);
@@ -102,8 +108,15 @@ router.post("/orders/create", authMiddleware, createOrder);
 router.get("/orders/table/:tableId", authMiddleware, getOrdersByTable);
 router.put("/orders/status/:orderId", authMiddleware, updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, deleteOrder);
-router.get("/orders/busy-tables", authMiddleware,getBusyTables);
-router.get("/orders/my-pending", authMiddleware,getMyPendingOrders);
-router.put("/close/:orderId",authMiddleware,     closeOrder);
+router.get("/orders/busy-tables", authMiddleware, getBusyTables);
+router.get("/orders/my-pending", authMiddleware, getMyPendingOrders);
+router.put("/orders/close/:orderId", authMiddleware, closeOrder); // ✅ TUZATILDI
+
+
+// ==================== PRINTERS ====================
+router.post("/printers", authMiddleware, onlyAdmin, createPrinter);
+router.get("/printers", authMiddleware, getPrinters);
+router.put("/printers/:id", authMiddleware, onlyAdmin, updatePrinter);
+router.delete("/printers/:id", authMiddleware, onlyAdmin, deletePrinter);
 
 module.exports = router;

@@ -8,6 +8,11 @@ const categorySchema = new mongoose.Schema(
       unique: true,
       trim: true,
     },
+    printer_id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Printer", // 👉 printer model bilan bog'laymiz
+      default: null,
+    },
   },
   {
     timestamps: true,

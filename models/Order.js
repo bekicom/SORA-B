@@ -38,9 +38,10 @@ const orderSchema = new mongoose.Schema(
     items: [orderItemSchema],
     status: {
       type: String,
-      enum: ["pending", "preparing", "ready", "served"],
+      enum: ["pending", "preparing", "ready", "served", "closed"], // ✅ "closed" qo‘shildi
       default: "pending",
     },
+
     total_price: {
       type: Number,
       required: true,
