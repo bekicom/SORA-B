@@ -56,6 +56,10 @@ const {
   updatePrinter,
   deletePrinter,
 } = require("../controllers/printer.controller");
+const {
+  getCheckSettings,
+  updateCheckSettings,
+} = require("../controllers/checkSettings.controller");
 
 // ==================== AUTH ====================
 router.post("/auth/login", login);
@@ -119,4 +123,8 @@ router.get("/printers", authMiddleware, getPrinters);
 router.put("/printers/:id", authMiddleware, onlyAdmin, updatePrinter);
 router.delete("/printers/:id", authMiddleware, onlyAdmin, deletePrinter);
 
+// ==================== CHECK SETTINGS ====================
+
+router.get("/pechat", getCheckSettings);
+router.post("/pechat", updateCheckSettings);
 module.exports = router;

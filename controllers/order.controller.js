@@ -1,42 +1,90 @@
 const Order = require("../models/Order");
 const Food = require("../models/Food");
+const Category = require("../models/Category");
+const axios = require("axios");
+const printSingleCheckToPrinter = require("../utils/printer");
 
-// ✅ Yangi zakaz yaratish
-exports.createOrder = async (req, res) => {
+// ✅ Printerga so‘rov yuborish
+const printToPrinter = async (printerIp, data) => {
   try {
-    const { table_id, items } = req.body;
-    const user_id = req.user._id; // token orqali keladi
+    await axios.post(`http://${printerIp}/print`, data, { timeout: 3000 });
+    console.log(`🖨️ Chek yuborildi: ${printerIp}`);
+  } catch (err) {
+    console.error(`❌ Printerga ulanib bo‘lmadi (${printerIp}):`, err.message);
+  }
+};
 
-    if (!table_id || !items || items.length === 0) {
-      return res.status(400).json({ message: "Ma'lumotlar to‘liq emas" });
-    }
+// ✅ Zakaz yaratish
+const createOrder = async (req, res) => {
+  try {
+    const { table_id, user_id, items, total_price } = req.body;
 
-    let total_price = 0;
-    for (let item of items) {
-      const food = await Food.findById(item.food_id);
-      if (!food) return res.status(404).json({ message: "Taom topilmadi" });
+    const grouped = {}; // kategoriyaId: [items]
+    const orderItems = [];
 
-      total_price += food.price * item.quantity;
-      item.name = food.name;
-      item.price = food.price;
+    for (const item of items) {
+      const food = await Food.findById(item.food_id).populate("category");
+      if (!food) continue;
+
+      const itemData = {
+        food_id: item.food_id,
+        name: food.name,
+        price: food.price,
+        quantity: item.quantity,
+      };
+
+      orderItems.push(itemData);
+
+      const categoryId = food.category._id.toString();
+      if (!grouped[categoryId]) grouped[categoryId] = [];
+      grouped[categoryId].push(itemData);
     }
 
     const order = await Order.create({
       table_id,
       user_id,
-      items,
+      items: orderItems,
       total_price,
+      status: "pending",
     });
+
+    // Har bir kategoriya bo‘yicha printerni topib, chek chiqaramiz
+    for (const [categoryId, groupedItems] of Object.entries(grouped)) {
+      const category = await Category.findById(categoryId).populate(
+        "printer_id"
+      );
+      if (!category || !category.printer_id) {
+        console.log(`❌ Printer topilmadi: kategoriya ID - ${categoryId}`);
+        continue;
+      }
+
+      const printerIp = category.printer_id.ip_address;
+
+      console.log(`🖨 Printerga yuborilmoqda: ${printerIp}`);
+      console.log(
+        `📦 Mahsulotlar:`,
+        groupedItems.map((i) => `${i.name} x${i.quantity}`)
+      );
+
+      await printSingleCheckToPrinter({
+        items: groupedItems,
+        table_number: table_id,
+        total_price,
+        printerIp,
+      });
+    }
 
     res.status(201).json(order);
   } catch (err) {
     console.error("❌ Zakaz yaratishda xatolik:", err);
-    res.status(500).json({ message: "Server xatoligi" });
+    res
+      .status(500)
+      .json({ message: "Zakaz yaratishda xatolik", error: err.message });
   }
 };
 
 // ✅ Stol bo‘yicha zakazlarni olish
-exports.getOrdersByTable = async (req, res) => {
+const getOrdersByTable = async (req, res) => {
   try {
     const { tableId } = req.params;
     const orders = await Order.find({ table_id: tableId }).sort({
@@ -49,7 +97,7 @@ exports.getOrdersByTable = async (req, res) => {
 };
 
 // ✅ Zakaz statusini yangilash
-exports.updateOrderStatus = async (req, res) => {
+const updateOrderStatus = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { status } = req.body;
@@ -64,7 +112,6 @@ exports.updateOrderStatus = async (req, res) => {
       { status },
       { new: true }
     );
-
     res.json(order);
   } catch (err) {
     res.status(500).json({ message: "Status yangilanishida xatolik" });
@@ -72,7 +119,7 @@ exports.updateOrderStatus = async (req, res) => {
 };
 
 // ✅ Zakazni o‘chirish
-exports.deleteOrder = async (req, res) => {
+const deleteOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
     await Order.findByIdAndDelete(orderId);
@@ -81,10 +128,13 @@ exports.deleteOrder = async (req, res) => {
     res.status(500).json({ message: "Zakaz o‘chirishda xatolik" });
   }
 };
-// orderController.js
-exports.getBusyTables = async (req, res) => {
+
+// ✅ Band stollar ro‘yxati
+const getBusyTables = async (req, res) => {
   try {
-    const orders = await Order.find({ status: { $in: ["pending", "preparing"] } });
+    const orders = await Order.find({
+      status: { $in: ["pending", "preparing"] },
+    });
     const busyTableIds = orders.map((o) => o.table_id.toString());
     res.json(busyTableIds);
   } catch (err) {
@@ -92,7 +142,8 @@ exports.getBusyTables = async (req, res) => {
   }
 };
 
- exports.getMyPendingOrders = async (req, res) => {
+// ✅ Foydalanuvchining aktiv zakazlari
+const getMyPendingOrders = async (req, res) => {
   try {
     const userId = req.user.id;
 
@@ -109,11 +160,9 @@ exports.getBusyTables = async (req, res) => {
 };
 
 // ✅ Zakazni yopish
-exports.closeOrder = async (req, res) => {
+const closeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-
-    console.log("🔁 Zakaz yopilmoqda, orderId:", orderId); // 👈 log qo‘shildi
 
     const order = await Order.findById(orderId);
     if (!order) {
@@ -128,12 +177,18 @@ exports.closeOrder = async (req, res) => {
     order.closedAt = new Date();
     await order.save();
 
-    console.log("✅ Zakaz yopildi:", order._id); // 👈 log qo‘shildi
-
     res.status(200).json({ message: "Zakaz yopildi", order });
   } catch (err) {
-    console.error("❌ Zakaz yopishda xatolik:", err); // 👈 bu log juda muhim
     res.status(500).json({ message: "Zakaz yopishda server xatoligi" });
   }
 };
 
+module.exports = {
+  createOrder,
+  getOrdersByTable,
+  updateOrderStatus,
+  deleteOrder,
+  getBusyTables,
+  getMyPendingOrders,
+  closeOrder,
+};
