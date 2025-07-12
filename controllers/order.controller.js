@@ -2,8 +2,8 @@ const Order = require("../models/Order");
 const Food = require("../models/Food");
 const Category = require("../models/Category");
 const axios = require("axios");
-const printSingleCheckToPrinter = require("../utils/printer");
-
+const User = require("../models/User");
+const Setting = require("../models/settings.model");
 // ✅ Printerga so‘rov yuborish
 const printToPrinter = async (printerIp, data) => {
   try {
@@ -66,12 +66,7 @@ const createOrder = async (req, res) => {
         groupedItems.map((i) => `${i.name} x${i.quantity}`)
       );
 
-      await printSingleCheckToPrinter({
-        items: groupedItems,
-        table_number: table_id,
-        total_price,
-        printerIp,
-      });
+ 
     }
 
     res.status(201).json(order);
@@ -165,21 +160,44 @@ const closeOrder = async (req, res) => {
     const { orderId } = req.params;
 
     const order = await Order.findById(orderId);
-    if (!order) {
-      return res.status(404).json({ message: "Zakaz topilmadi" });
-    }
+    if (!order) return res.status(404).json({ message: "Zakaz topilmadi" });
 
-    if (order.status === "closed") {
+    if (order.status === "closed")
       return res.status(400).json({ message: "Zakaz allaqachon yopilgan" });
-    }
 
+    // 🔎 Afitsantni topamiz
+    const waiter = await User.findById(order.user_id);
+    const setting = await Setting.findOne();
+
+    // ✅ Zakazni yopamiz
     order.status = "closed";
     order.closedAt = new Date();
     await order.save();
 
-    res.status(200).json({ message: "Zakaz yopildi", order });
+    // ✅ Chek ma'lumotlarini tayyorlash
+    const checkData = {
+      restaurant_name: setting?.restaurant_name || "Restoran",
+      address: setting?.address || "-",
+      phone: setting?.phone || "-",
+      table_number: order.table_id,
+      date: new Date().toLocaleString("uz-UZ"),
+      waiter_name: waiter?.first_name || "Afitsant",
+      items: order.items,
+      total_price: order.total_price,
+    };
+
+    // 🖨️ Printerga chiqarish (agar kerak bo‘lsa)
+    // await printToPrinter(setting?.printer_ip, checkData);
+
+    // ✅ Frontendga chekni qaytaramiz
+    res.status(200).json({
+      message: "Zakaz yopildi",
+      order,
+      check: checkData, // frontendda print qilish uchun
+    });
   } catch (err) {
-    res.status(500).json({ message: "Zakaz yopishda server xatoligi" });
+    console.error("Zakaz yopishda xatolik:", err);
+    res.status(500).json({ message: "Server xatosi", error: err.message });
   }
 };
 

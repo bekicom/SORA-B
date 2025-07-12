@@ -46,6 +46,12 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
+
+    // 🖨 Oshpaz uchun bosma chek dizayni
+    kitchen_print_template: {
+      type: String,
+      default: "", // bo‘sh bo‘lishi mumkin
+    },
   },
   { timestamps: true }
 );
