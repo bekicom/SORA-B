@@ -33,10 +33,10 @@ const testPrinterConnection = (ip) => {
 // ➕ Yangi printer qo'shish
 exports.createPrinter = async (req, res) => {
   try {
-    const { name, ip,  description } = req.body;
+    const { name, ip, description } = req.body;
 
     // Validatsiya
-    if (!name || !ip ) {
+    if (!name || !ip) {
       return res.status(400).json({
         message: "Majburiy maydonlar to'ldirilmagan",
         required: ["name", "ip", "location"],
@@ -77,7 +77,7 @@ exports.createPrinter = async (req, res) => {
     const printer = await Printer.create({
       name,
       ip,
-      
+
       description,
       status: connectionStatus,
       lastChecked: new Date(),
@@ -198,7 +198,7 @@ exports.updatePrinter = async (req, res) => {
     const updateData = {
       ...(name && { name }),
       ...(ip && { ip }),
-     
+
       ...(description && { description }),
       status: connectionStatus,
       lastChecked: new Date(),
@@ -387,7 +387,7 @@ exports.printTestReceipt = async (req, res) => {
           .align("LT")
           .text(`Printer: ${printer.name}`)
           .text(`IP: ${printer.ip}`)
-   
+
           .text(`Sana: ${new Date().toLocaleString("uz-UZ")}`)
           .drawLine()
           .align("CT")

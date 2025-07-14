@@ -1,26 +1,46 @@
 const Order = require("../models/Order");
 const Food = require("../models/Food");
 const Category = require("../models/Category");
-const axios = require("axios");
 const User = require("../models/User");
-const Setting = require("../models/settings.model");
-const Printer = require("../models/Printer"); // printer modelini ham chaqiramiz
+const Setting = require("../models/settings");
+const Printer = require("../models/Printer");
+const axios = require("axios");
 
-// ✅ Printerga so‘rov yuborish
-const printToPrinter = async (data) => {
+// 🖨️ Print server orqali yuborish (sizning eski kodingiz)
+const printToPrinter = async (printerIp, data) => {
   try {
-    await axios.post(`http://localhost:5000/print`, data, { timeout: 3000 });
-    console.log(`✅ Print yuborildi (localhost)`);
+    console.log(
+      `🖨️ Print yuborilmoqda (${printerIp}):`,
+      JSON.stringify(data, null, 2)
+    );
+
+    // Sizning print server endpoint ingizga yuborish
+    const response = await axios.post(
+      `http://localhost:5000/print`,
+      {
+        ...data,
+        printerIp: printerIp, // Printer IP ni qo'shish
+      },
+      {
+        timeout: 8000,
+        headers: {
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log(`✅ Print muvaffaqiyatli yuborildi (${printerIp})`);
+    return { success: true, response: response.data };
   } catch (err) {
-    console.error(`❌ Printerga ulanib bo‘lmadi:`, err.message);
+    console.error(`❌ ${printerIp} printerga ulanib bo'lmadi:`, err.message);
+    return { success: false, error: err.message };
   }
 };
 
 const createOrder = async (req, res) => {
   try {
     const { table_id, user_id, items, total_price } = req.body;
-    console.log(req.body);
-    
+    console.log("📝 Yangi zakaz ma'lumotlari:", req.body);
 
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ message: "Kamida bitta taom kerak" });
@@ -28,6 +48,7 @@ const createOrder = async (req, res) => {
 
     const updatedItems = [];
 
+    // 🔍 Har bir item uchun ma'lumotlarni to'ldirish
     for (const item of items) {
       const { food_id, quantity } = item;
 
@@ -42,21 +63,31 @@ const createOrder = async (req, res) => {
 
       const category = food.category;
       if (!category || !category.printer_id) {
-        return res.status(400).json({ message: `Kategoriya/printer topilmadi: ${food.name}` });
+        return res.status(400).json({
+          message: `Kategoriya/printer topilmadi: ${food.name}`,
+        });
       }
 
       const printer = await Printer.findById(category.printer_id);
+      if (!printer) {
+        return res.status(404).json({
+          message: `Printer topilmadi: ${category.printer_id}`,
+        });
+      }
 
       updatedItems.push({
         food_id,
         name: food.name,
         price: food.price,
         quantity,
+        category_name: category.title,
         printer_id: category.printer_id,
-        printer_ip: printer?.ip || "",
+        printer_ip: printer.ip,
+        printer_name: printer.name,
       });
     }
 
+    // 💾 Zakazni saqlash
     const newOrder = await Order.create({
       table_id,
       user_id,
@@ -67,46 +98,105 @@ const createOrder = async (req, res) => {
       waiter_name: req.body.first_name,
     });
 
-    // 🖨️ IP bo‘yicha itemlarni guruhlab yuborish
-    const printerOrders = {}; // { ip: [items] }
+    console.log("✅ Zakaz saqlandi:", newOrder._id);
+
+    // 🖨️ YAXSHILANGAN: Printer bo'yicha guruhlab yuborish
+    const printerGroups = {};
 
     for (const item of updatedItems) {
-      if (!item.printer_ip) continue;
-
-      if (!printerOrders[item.printer_ip]) {
-        printerOrders[item.printer_ip] = [];
+      if (!item.printer_ip) {
+        console.warn(`⚠️ Printer IP yo'q: ${item.name}`);
+        continue;
       }
 
-      printerOrders[item.printer_ip].push({
+      const printerKey = item.printer_ip;
+
+      if (!printerGroups[printerKey]) {
+        printerGroups[printerKey] = {
+          printer_ip: item.printer_ip,
+          printer_name: item.printer_name,
+          items: [],
+        };
+      }
+
+      printerGroups[printerKey].items.push({
         name: item.name,
         quantity: item.quantity,
         price: item.price,
+        category: item.category_name,
+        food_id: item.food_id,
       });
     }
 
-    // 🖨️ Har bir printerga alohida chiqarish
-    for (const [printerIp, items] of Object.entries(printerOrders)) {
+    console.log("🖨️ Printer guruhlari:", Object.keys(printerGroups));
+
+    // 🖨️ Har bir printer guruhiga sizning print server orqali yuborish
+    const printResults = [];
+
+    for (const [printerIp, group] of Object.entries(printerGroups)) {
+      console.log(
+        `📤 ${printerIp} ga yuborilmoqda:`,
+        group.items.length,
+        "ta item"
+      );
+
       const payload = {
-        table_number: table_id,
-        items,
+        items: group.items,
+        table_number: req.body.table_number || table_id,
+        waiter_name: req.body.first_name || "Nomalum",
         date: new Date().toLocaleString("uz-UZ"),
+        type: "new_order",
+        order_id: newOrder._id.toString(),
+        printerIp: printerIp, // Print server uchun IP
       };
 
-      await printToPrinter(printerIp, payload);
+      const printResult = await printToPrinter(printerIp, payload);
+      printResults.push({
+        printer_ip: printerIp,
+        printer_name: group.printer_name,
+        items_count: group.items.length,
+        success: printResult.success,
+        error: printResult.error || null,
+      });
     }
 
+    // 📊 Print natijalarini log qilish
+    console.log("📊 Print natijalari:");
+    printResults.forEach((result) => {
+      if (result.success) {
+        console.log(
+          `✅ ${result.printer_ip} (${result.printer_name}) - ${result.items_count} item`
+        );
+      } else {
+        console.log(
+          `❌ ${result.printer_ip} (${result.printer_name}) - XATOLIK: ${result.error}`
+        );
+      }
+    });
+
+    // 🔄 Print natijalarini response ga qo'shish
     res.status(201).json({
       message: "Zakaz muvaffaqiyatli yaratildi",
       order: newOrder,
+      print_results: printResults,
+      total_printers: Object.keys(printerGroups).length,
+      debug: {
+        total_items: updatedItems.length,
+        printer_groups: Object.keys(printerGroups),
+        timestamp: new Date().toISOString(),
+      },
     });
   } catch (error) {
     console.error("❌ Zakaz yaratishda xatolik:", error);
-    res.status(500).json({ message: "Server xatosi", error: error.message });
+    res.status(500).json({
+      message: "Server xatosi",
+      error: error.message,
+      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
+    });
   }
 };
 
-
-// ✅ Qolgan funksiyalar o‘zgarmaydi
+// ✅ Qolgan funksiyalar o'zgarmaydi
 const getOrdersByTable = async (req, res) => {
   try {
     const { tableId } = req.params;
@@ -126,7 +216,7 @@ const updateOrderStatus = async (req, res) => {
 
     const allowedStatuses = ["pending", "preparing", "ready", "served"];
     if (!allowedStatuses.includes(status)) {
-      return res.status(400).json({ message: "Noto‘g‘ri status" });
+      return res.status(400).json({ message: "Noto'g'ri status" });
     }
 
     const order = await Order.findByIdAndUpdate(
@@ -144,9 +234,9 @@ const deleteOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
     await Order.findByIdAndDelete(orderId);
-    res.json({ message: "Zakaz o‘chirildi" });
+    res.json({ message: "Zakaz o'chirildi" });
   } catch (err) {
-    res.status(500).json({ message: "Zakaz o‘chirishda xatolik" });
+    res.status(500).json({ message: "Zakaz o'chirishda xatolik" });
   }
 };
 
@@ -178,11 +268,12 @@ const getMyPendingOrders = async (req, res) => {
   }
 };
 
+// 🔄 ZAKASNI YOPISH (chek chiqarish o'chirildi - faqat frontend dan)
 const closeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const order = await Order.findById(orderId);
+    const order = await Order.findById(orderId).populate("items.food_id");
     if (!order) return res.status(404).json({ message: "Zakaz topilmadi" });
 
     if (order.status === "closed")
@@ -191,25 +282,33 @@ const closeOrder = async (req, res) => {
     const waiter = await User.findById(order.user_id);
     const setting = await Setting.findOne();
 
+    // ✅ Faqat status ni o'zgartirish
     order.status = "closed";
     order.closedAt = new Date();
     await order.save();
 
+    // 📋 Chek ma'lumotlarini tayyorlash (frontend uchun)
     const checkData = {
-      restaurant_name: setting?.restaurant_name || "Restoran",
-      address: setting?.address || "-",
-      phone: setting?.phone || "-",
-      table_number: order.table_id,
+      restaurant_name: setting?.restaurant_name || "RESTORAN",
+      address: setting?.address || "",
+      phone: setting?.phone || "",
+      table_number: order.table_number || order.table_id,
       date: new Date().toLocaleString("uz-UZ"),
       waiter_name: waiter?.first_name || "Afitsant",
       items: order.items,
       total_price: order.total_price,
+      order_id: order._id.toString(),
     };
+
+    // ❌ AVTOMATIK CHEK CHIQARISH O'CHIRILDI
+    // Frontend o'zi chek chiqaradi!
+
+    console.log("✅ Zakaz yopildi:", order._id);
 
     res.status(200).json({
       message: "Zakaz yopildi",
       order,
-      check: checkData,
+      check: checkData, // Frontend uchun chek ma'lumotlari
     });
   } catch (err) {
     console.error("Zakaz yopishda xatolik:", err);

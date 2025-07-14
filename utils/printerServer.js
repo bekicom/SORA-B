@@ -8,7 +8,7 @@ function initPrinterServer(app) {
       const { items, table_number, waiter_name, date, type } = req.body;
 
       // Printer IP ni req.body dan olish yoki localhost dan
-      const printerIp = req.body.printer_ip || "localhost";
+      const printerIp = req.body.printerIp || "192.168.0.100";
 
       const device = new escpos.Network(printerIp, 9100);
       const printer = new escpos.Printer(device);
