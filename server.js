@@ -4,17 +4,16 @@ const dotenv = require("dotenv");
 const cors = require("cors");
 const connectDB = require("./config/db");
 const mainRoutes = require("./routes");
-const printRoutes = require("./routes/printRouter"); // Yangi import
 const http = require("http");
 const { Server } = require("socket.io");
-const htmlPrintRoutes = require("./routes/htmlPrintRoutes"); // ← BU YANGI
+const initPrinterServer = require("./utils/printerServer"); // printer serverni import
 
 dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
 
-// Socket.io
+// 🔌 Socket.io sozlamalari
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -22,7 +21,7 @@ const io = new Server(server, {
   },
 });
 
-// Socket hodisalar
+// 🧠 Socket hodisalari
 io.on("connection", (socket) => {
   console.log("🔌 Yangi ulanish:", socket.id);
 
@@ -41,17 +40,18 @@ io.on("connection", (socket) => {
   });
 });
 
-// Middleware
+// ✅ Middleware
 app.use(cors());
 app.use(express.json());
+initPrinterServer(app); // shu joyga qo‘yilishi to‘g‘ri
 connectDB();
 
-// Routes
+// ✅ API yo‘llar
 app.use("/api", mainRoutes);
-app.use("/print", printRoutes); // Print route'larini qo'shish
-app.use("/aa", htmlPrintRoutes);
 
-// 🚀 Server ishga tushurish
+// ✅ Printer serverni ishga tushurish
+
+// 🚀 Server ishga tushirish
 const PORT = process.env.PORT || 5004;
 server.listen(PORT, () => {
   console.log(`🚀 Server ${PORT}-portda ishlayapti`);

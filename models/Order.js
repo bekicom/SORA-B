@@ -1,5 +1,6 @@
 const mongoose = require("mongoose");
 
+// Avval item schema yaratiladi
 const orderItemSchema = new mongoose.Schema(
   {
     food_id: {
@@ -9,7 +10,7 @@ const orderItemSchema = new mongoose.Schema(
     },
     name: {
       type: String,
-      required: true, // denormalizatsiya qilingan
+      required: true,
     },
     price: {
       type: Number,
@@ -23,6 +24,7 @@ const orderItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
+// So‘ng order schema
 const orderSchema = new mongoose.Schema(
   {
     table_id: {
@@ -35,23 +37,21 @@ const orderSchema = new mongoose.Schema(
       ref: "User",
       required: true,
     },
-    items: [orderItemSchema],
+    items: [orderItemSchema], // ✅ Bu joyda item schema ishlatilmoqda
     status: {
       type: String,
-      enum: ["pending", "preparing", "ready", "served", "closed"], // ✅ "closed" qo‘shildi
+      enum: ["pending", "preparing", "ready", "served", "closed"],
       default: "pending",
     },
-
     total_price: {
       type: Number,
       required: true,
     },
-
-    // 🖨 Oshpaz uchun bosma chek dizayni
     kitchen_print_template: {
       type: String,
-      default: "", // bo‘sh bo‘lishi mumkin
+      default: "",
     },
+    printer_id: { type: mongoose.Schema.Types.ObjectId, ref: "Printer" },
   },
   { timestamps: true }
 );

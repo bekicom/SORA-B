@@ -11,10 +11,7 @@ const printerSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
-    location: {
-      type: String,
-      default: "",
-    },
+
   },
   { timestamps: true }
 );

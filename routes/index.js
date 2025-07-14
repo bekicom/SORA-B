@@ -21,8 +21,8 @@ router.post("/auth/register", auth.register);
 router.get("/auth/me", authMiddleware, auth.getMe);
 
 // ===== USERS =====
-router.post("/users", authMiddleware, onlyAdmin, user.createUser);
-router.get("/users", authMiddleware, user.getAllUsers);
+router.post("/users", onlyAdmin, user.createUser);
+router.get("/users", user.getAllUsers);
 router.put("/users/:id", authMiddleware, user.updateUser);
 router.delete("/users/:id", authMiddleware, user.deleteUser);
 
@@ -79,10 +79,10 @@ router.put("/orders/status/:orderId", authMiddleware, order.updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, order.deleteOrder);
 router.get("/orders/busy-tables", authMiddleware, order.getBusyTables);
 router.get("/orders/my-pending", authMiddleware, order.getMyPendingOrders);
-router.put("/orders/close/:orderId", authMiddleware, order.closeOrder); // ✅ Zakasni yopish
+router.put("/orders/close/:orderId", authMiddleware, order.closeOrder);
 
 // ===== PRINTERS =====
-router.post("/printers", onlyAdmin, printer.createPrinter);
+router.post("/printers", authMiddleware, onlyAdmin, printer.createPrinter);
 router.get("/printers", authMiddleware, printer.getPrinters);
 router.put("/printers/:id", authMiddleware, onlyAdmin, printer.updatePrinter);
 router.delete(
