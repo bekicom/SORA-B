@@ -81,6 +81,11 @@ router.delete("/orders/delete/:orderId", authMiddleware, order.deleteOrder);
 router.get("/orders/busy-tables", authMiddleware, order.getBusyTables);
 router.get("/orders/my-pending", authMiddleware, order.getMyPendingOrders);
 router.put("/orders/close/:orderId", authMiddleware, order.closeOrder);
+router.post(
+  "/orders/print-receipt/:orderId",
+  authMiddleware,
+  order.printReceipt
+);
 
 // ===== PRINTERS =====
 router.post("/printers", authMiddleware, onlyAdmin, printer.createPrinter);
