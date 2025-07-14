@@ -4,7 +4,7 @@ const authMiddleware = require("../middlewares/auth.middleware");
 const upload = require("../middlewares/upload.middleware");
 const { onlyAdmin } = require("../middlewares/role.middleware");
 
-// ===== CONTROLLERS =====
+// Controllers
 const auth = require("../controllers/auth.controller");
 const user = require("../controllers/user.controller");
 const table = require("../controllers/table.controller");
@@ -13,7 +13,7 @@ const department = require("../controllers/department.controller");
 const food = require("../controllers/food.controller");
 const order = require("../controllers/order.controller");
 const printer = require("../controllers/printer.controller");
-const setting = require("../controllers/settings.controller"); // ✅ Tuzatildi
+const setting = require("../controllers/settings.controller");
 const client = require("../controllers/clientController");
 
 // ===== AUTH =====
@@ -52,7 +52,6 @@ router.delete("/foods/delete/:id", authMiddleware, food.deleteFood);
 // ===== IMAGE UPLOAD =====
 router.post("/upload", upload.single("image"), (req, res) => {
   if (!req.file) return res.status(400).json({ message: "Rasm yuklanmadi" });
-
   const imageUrl = `${req.protocol}://${req.get("host")}/uploads/${
     req.file.filename
   }`;
@@ -90,6 +89,7 @@ router.post(
 // ===== PRINTERS =====
 router.post("/printers", authMiddleware, onlyAdmin, printer.createPrinter);
 router.get("/printers", authMiddleware, printer.getPrinters);
+router.get("/printers/:id", authMiddleware, printer.getPrinterById);
 router.put("/printers/:id", authMiddleware, onlyAdmin, printer.updatePrinter);
 router.delete(
   "/printers/:id",
@@ -97,67 +97,56 @@ router.delete(
   onlyAdmin,
   printer.deletePrinter
 );
-router.get("/printers/:id", authMiddleware, printer.getPrinterById); // ✅ Qo'shildi
 router.post(
   "/printers/:id/test",
   authMiddleware,
   onlyAdmin,
   printer.testPrinter
-); // ✅ Qo'shildi
+);
 router.post(
   "/printers/:id/print-test",
   authMiddleware,
   onlyAdmin,
   printer.printTestReceipt
-); // ✅ Qo'shildi
+);
 
-// ===== SETTINGS (TO'LIQ YANGILANDI) =====
-// 📖 Sozlamalarni olish
-router.get("/settings", setting.getSettings); // ✅ authMiddleware olib tashlandi (frontend uchun)
-
-// ➕ Sozlamalarni yaratish
+// ===== SETTINGS =====
+router.get("/settings", setting.getSettings);
 router.post("/settings", authMiddleware, onlyAdmin, setting.createSettings);
-
-// ✏️ Sozlamalarni yangilash
 router.put("/settings", authMiddleware, onlyAdmin, setting.updateSettings);
-
-// 🖼️ Logo yuklash
 router.post(
   "/settings/upload-logo",
   authMiddleware,
   onlyAdmin,
   setting.uploadLogo
 );
-
-// 🗑️ Logo o'chirish
 router.delete("/settings/logo", authMiddleware, onlyAdmin, setting.deleteLogo);
-
-// 🔄 Default holatga qaytarish
 router.post(
   "/settings/reset",
   authMiddleware,
   onlyAdmin,
   setting.resetToDefault
 );
-
-// 🧪 Test chek ma'lumotlari
 router.get(
   "/settings/test-receipt",
   authMiddleware,
   setting.generateTestReceipt
 );
-
-// 📊 Sozlamalar info
 router.get("/settings/info", setting.getSettingsInfo);
+router.get("/settings/public", (req, res) => setting.getSettings(req, res));
+router.post(
+  "/settings/test-kassir-printer",
+  authMiddleware,
+  onlyAdmin,
+  setting.testKassirPrinter
+);
+router.get(
+  "/settings/kassir-printer-status",
+  authMiddleware,
+  setting.getKassirPrinterStatus
+);
 
-// 📱 Public sozlamalar (auth siz)
-router.get("/settings/public", (req, res) => {
-  // Public ma'lumotlarni qaytarish
-  setting.getSettings(req, res);
-});
-
-// ===== ESKI SETTINGS ROUTES (DEPRECATED - BACKWARD COMPATIBILITY) =====
-// Eski frontend bilan mos kelishi uchun
+// Backward compatibility
 router.post(
   "/settings/create",
   authMiddleware,
@@ -170,7 +159,7 @@ router.put(
   onlyAdmin,
   setting.updateSettings
 );
-router.get("/settings/get", setting.getSettings); // Eski route
+router.get("/settings/get", setting.getSettings);
 
 // ===== CLIENTS =====
 router.post("/clients/create", authMiddleware, client.createClient);
@@ -194,28 +183,17 @@ router.get("/health", (req, res) => {
   });
 });
 
-
-
-// ===== DEBUG INFO (DEVELOPMENT ONLY) =====
+// ===== DEBUG (DEVELOPMENT ONLY) =====
 if (process.env.NODE_ENV === "development") {
   router.get("/debug/routes", (req, res) => {
     const routes = [];
-
     router.stack.forEach((middleware) => {
       if (middleware.route) {
         const methods = Object.keys(middleware.route.methods);
-        routes.push({
-          path: middleware.route.path,
-          methods: methods,
-        });
+        routes.push({ path: middleware.route.path, methods });
       }
     });
-
-    res.json({
-      success: true,
-      total_routes: routes.length,
-      routes: routes,
-    });
+    res.json({ success: true, total_routes: routes.length, routes });
   });
 }
 

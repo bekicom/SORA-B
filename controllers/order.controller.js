@@ -66,6 +66,7 @@ const printReceiptToKassir = async (receiptData) => {
 };
 
 // 🧾 ZAKASNI YOPISH VA CHEK CHIQARISH (YANGILANDI - Daily Number + Table Info)
+// 🧾 ZAKASNI YOPISH VA AVTOMATIK CHEK CHIQARISH (YANGILANGAN)
 const closeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -85,8 +86,12 @@ const closeOrder = async (req, res) => {
       return res.status(400).json({ message: "Zakaz allaqachon yopilgan" });
     }
 
-    // Settings ni olish
-    const settings = await Settings.findOne({ is_active: true });
+    // ✅ Settings ni kassir printer bilan olish
+    const settings = await Settings.getActiveWithKassirPrinter();
+
+    if (!settings) {
+      console.warn("⚠️ Settings topilmadi, default qiymatlar ishlatiladi");
+    }
 
     // User va Table ma'lumotlari
     const waiter = order.user_id;
@@ -98,6 +103,11 @@ const closeOrder = async (req, res) => {
       table_name: table?.name,
       table_number: table?.number,
       waiter_name: waiter?.first_name,
+      kassir_printer: settings?.kassir_printer_id ? {
+        id: settings.kassir_printer_id._id,
+        name: settings.kassir_printer_id.name,
+        ip: settings.kassir_printer_id.ip
+      } : null
     });
 
     // 💰 Summalarni hisoblash
@@ -118,19 +128,17 @@ const closeOrder = async (req, res) => {
     await order.save();
 
     // 🆕 Table display info
-    const tableDisplayInfo = table
-      ? {
-          id: table._id,
-          name: table.name,
-          number: table.number || table.name,
-          display_name: table.display_name || table.name,
-        }
-      : {
-          id: order.table_id,
-          name: order.table_number || "Noma'lum",
-          number: order.table_number || "Noma'lum",
-          display_name: order.table_number || "Noma'lum",
-        };
+    const tableDisplayInfo = table ? {
+      id: table._id,
+      name: table.name,
+      number: table.number || table.name,
+      display_name: table.display_name || table.name,
+    } : {
+      id: order.table_id,
+      name: order.table_number || "Noma'lum",
+      number: order.table_number || "Noma'lum",
+      display_name: order.table_number || "Noma'lum",
+    };
 
     // 📋 Chek ma'lumotlarini tayyorlash
     const receiptData = {
@@ -145,18 +153,18 @@ const closeOrder = async (req, res) => {
       order_id: order._id.toString(),
       daily_order_number: order.daily_order_number,
       formatted_order_number: order.formatted_order_number,
-
+      
       // ✅ Table info (number instead of ID)
       table_id: tableDisplayInfo.id,
       table_name: tableDisplayInfo.name,
       table_number: tableDisplayInfo.number,
       table_display: tableDisplayInfo.display_name,
-
+      
       // Date info
       date: new Date().toLocaleString("uz-UZ"),
       closed_at: order.closedAt.toLocaleString("uz-UZ"),
       order_date: order.order_date,
-
+      
       // ✅ Waiter info
       waiter_name: waiter?.first_name || order.waiter_name || "Afitsant",
       waiter_id: waiter?._id,
@@ -193,17 +201,91 @@ const closeOrder = async (req, res) => {
       table_display: receiptData.table_display,
       total_amount: receiptData.total_amount,
       items_count: receiptData.items.length,
+      kassir_printer_ip: receiptData.kassir_printer_ip,
+      auto_print: settings?.auto_print_receipt,
+      print_copies: settings?.print_receipt_copies
     });
 
-    // 🧾 Kassir chekini chiqarish
-    let receiptResult = { success: false, error: "Chek chiqarilmadi" };
+    // 🧾 AVTOMATIK KASSIR CHEKINI CHIQARISH
+    let receiptResults = [];
+    let totalPrintSuccess = 0;
 
-    try {
-      receiptResult = await printReceiptToKassir(receiptData);
-      console.log("🧾 Kassir cheki natijasi:", receiptResult);
-    } catch (receiptError) {
-      console.error("❌ Kassir cheki xatoligi:", receiptError);
-      receiptResult = { success: false, error: receiptError.message };
+    if (settings?.auto_print_receipt && settings?.kassir_printer_ip) {
+      console.log("🖨️ Avtomatik kassir cheki chiqarilmoqda...");
+      
+      const printCopies = settings.print_receipt_copies || 1;
+      
+      for (let copy = 1; copy <= printCopies; copy++) {
+        try {
+          const copyReceiptData = {
+            ...receiptData,
+            copy_number: copy,
+            total_copies: printCopies,
+            print_time: new Date().toISOString(),
+          };
+
+          const receiptResult = await printReceiptToKassir(copyReceiptData);
+          
+          receiptResults.push({
+            copy_number: copy,
+            success: receiptResult.success,
+            error: receiptResult.error || null,
+            printer_ip: settings.kassir_printer_ip,
+            printer_name: settings.kassir_printer_id?.name || "Kassir Printer",
+          });
+
+          if (receiptResult.success) {
+            totalPrintSuccess++;
+            console.log(`✅ Kassir cheki nusxasi ${copy}/${printCopies} chiqarildi`);
+          } else {
+            console.error(`❌ Kassir cheki nusxasi ${copy}/${printCopies} xatolik:`, receiptResult.error);
+          }
+
+          // Nusxalar orasida kichik pauza
+          if (copy < printCopies) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+          }
+
+        } catch (receiptError) {
+          console.error(`❌ Kassir cheki nusxasi ${copy} chiqarishda xatolik:`, receiptError);
+          receiptResults.push({
+            copy_number: copy,
+            success: false,
+            error: receiptError.message,
+            printer_ip: settings.kassir_printer_ip,
+            printer_name: settings.kassir_printer_id?.name || "Kassir Printer",
+          });
+        }
+      }
+
+      console.log(`📊 Kassir cheki natijalari: ${totalPrintSuccess}/${printCopies} muvaffaqiyatli`);
+    } else {
+      console.log("ℹ️ Avtomatik chek chiqarish o'chirilgan yoki kassir printer tanlanmagan");
+      
+      // Manual fallback
+      try {
+        const manualResult = await printReceiptToKassir(receiptData);
+        receiptResults.push({
+          copy_number: 1,
+          success: manualResult.success,
+          error: manualResult.error || null,
+          printer_ip: receiptData.kassir_printer_ip,
+          printer_name: "Default Printer",
+          note: "Manual fallback print"
+        });
+        
+        if (manualResult.success) totalPrintSuccess = 1;
+      } catch (manualError) {
+        console.error("❌ Manual fallback print xatoligi:", manualError);
+        receiptResults.push({
+          copy_number: 1,
+          success: false,
+          error: manualError.message,
+          printer_ip: receiptData.kassir_printer_ip,
+          printer_name: "Default Printer",
+          note: "Manual fallback failed"
+        });
+      }
     }
 
     console.log("✅ Zakaz yopildi:", order.formatted_order_number);
@@ -225,8 +307,16 @@ const closeOrder = async (req, res) => {
       },
       table: tableDisplayInfo,
       receipt: {
-        printed: receiptResult.success,
-        error: receiptResult.error || null,
+        printed: totalPrintSuccess > 0,
+        total_copies: receiptResults.length,
+        successful_copies: totalPrintSuccess,
+        auto_print_enabled: settings?.auto_print_receipt || false,
+        kassir_printer: settings?.kassir_printer_id ? {
+          id: settings.kassir_printer_id._id,
+          name: settings.kassir_printer_id.name,
+          ip: settings.kassir_printer_id.ip
+        } : null,
+        print_results: receiptResults,
         data: receiptData,
       },
       totals: {
