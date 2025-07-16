@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    @page { 
+      size: 58mm auto; 
+      margin: 0; 
+    }
+    body { 
+      font-family: Arial; 
+      font-size: 14px; 
+      color: #000000; 
+      width: 58mm;
+      margin: 0; 
+      padding: 8px;
+      line-height: 1.2;
+    }
+    .header { 
+      text-align: center; 
+      margin-bottom: 8px; 
+    }
+    .restaurant-name { 
+      font-size: 18px; 
+      font-weight: bold; 
+      margin-bottom: 2px;
+    }
+    .contact { 
+      font-size: 12px; 
+      margin-bottom: 1px;
+    }
+    .divider {
+      border-top: 1px dashed #000;
+      margin: 8px 0;
+    }
+    .order-info { 
+      font-size: 12px; 
+      margin-bottom: 8px; 
+    }
+    .order-info div {
+      margin-bottom: 1px;
+    }
+    .items-header { 
+      font-weight: bold; 
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+    .item { 
+      font-size: 12px; 
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 2px;
+    }
+    .item-name {
+      flex: 1;
+      padding-right: 4px;
+    }
+    .item-qty {
+      width: 20px;
+      text-align: center;
+    }
+    .item-price {
+      width: 60px;
+      text-align: right;
+    }
+    .totals { 
+      font-size: 12px; 
+      margin-top: 8px;
+    }
+    .total-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 1px;
+    }
+    .final-total { 
+      font-weight: bold; 
+      font-size: 14px;
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid #000;
+    }
+    .qr-section { 
+      text-align: center; 
+      margin: 8px 0; 
+      font-size: 12px;
+    }
+    .footer { 
+      text-align: center; 
+      margin-top: 8px; 
+      font-size: 12px; 
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    
+    <div class="restaurant-name">OQTEPA LAVASH</div>
+    <div class="contact">+998 93 907 53 50</div>
+    <div class="contact">Toshkent sh., Yunusobod tumani</div>
+    <div class="contact">www.sora-restaurant.uz</div>
+  </div>
+  
+  <div class="divider"></div>
+  
+  <div class="order-info">
+    <div>Дата: 16/07/2025, 11:19:16</div>
+    <div>Официант: beki96</div>
+    <div>Стол: 65</div>
+    <div>Гостей: 2</div>
+  </div>
+  
+  <div class="divider"></div>
+  
+  <div class="items-header">
+    <span>Наименование</span>
+    <span>Кол</span>
+    <span>Сумма</span>
+  </div>
+  
+  
+    <div class="item">
+      <span class="item-name">perojni</span>
+      <span class="item-qty">8</span>
+      <span class="item-price">30 000</span>
+    </div>
+  
+  
+  <div class="divider"></div>
+  
+  <div class="totals">
+    <div class="total-row">
+      <span>Сумма:</span>
+      <span>240 000 UZS</span>
+    </div>
+    <div class="total-row">
+      <span>Обслуживание (10%):</span>
+      <span>24 000 UZS</span>
+    </div>
+    <div class="total-row">
+      <span>Налог (12%):</span>
+      <span>28 800 UZS</span>
+    </div>
+    <div class="final-total total-row">
+      <span>ИТОГО:</span>
+      <span>292 800 UZS</span>
+    </div>
+  </div>
+  
+  <div class="qr-section">[QR КОД]</div>
+  
+  <div class="footer">Rahmat! Yana tashrif buyuring!</div>
+</body>
+</html>

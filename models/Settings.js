@@ -93,7 +93,7 @@ const settingsSchema = new mongoose.Schema(
     },
     kassir_printer_ip: {
       type: String,
-      default: null,
+      default: "192.168.0.106", // ← Bu qatorni null dan "192.168.0.106" ga o'zgartiring
       validate: {
         validator: function (v) {
           if (!v) return true; // Allow null/empty
