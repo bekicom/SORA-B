@@ -311,6 +311,115 @@ const generateTestReceipt = async (req, res) => {
   }
 };
 
+// ✅ YANGI: HTML to Image Print Endpoint
+const printImageReceipt = async (req, res) => {
+  try {
+    const {
+      imageData,
+      printer_ip,
+      width,
+      height,
+      restaurant_name,
+      order_data,
+    } = req.body;
+
+    console.log("🖼️ HTML to Image print request:", {
+      printer_ip,
+      width,
+      height,
+      restaurant_name,
+      imageDataLength: imageData ? imageData.length : 0,
+    });
+
+    if (!imageData) {
+      return res.status(400).json({
+        success: false,
+        message: "Image data topilmadi",
+      });
+    }
+
+    const printerIP = printer_ip || "192.168.0.106";
+
+    // 1. Base64 image'ni buffer'ga aylantirish
+    const base64Data = imageData.replace(/^data:image\/png;base64,/, "");
+    const imageBuffer = Buffer.from(base64Data, "base64");
+
+    console.log("📸 Image buffer yaratildi:", {
+      size: imageBuffer.length,
+      type: "PNG",
+    });
+
+    // 2. ESC/POS printer'ga yuborish
+    const escpos = require("escpos");
+    escpos.Network = require("escpos-network");
+
+    const device = new escpos.Network(printerIP, 9100);
+    const printer = new escpos.Printer(device);
+
+    device.open((err) => {
+      if (err) {
+        console.error(
+          `❌ Printer'ga (${printerIP}) ulanib bo'lmadi:`,
+          err.message
+        );
+        return res.status(400).json({
+          success: false,
+          message: `Printer'ga (${printerIP}) ulanib bo'lmadi`,
+          error: err.message,
+        });
+      }
+
+      console.log(`✅ Printer'ga (${printerIP}) ulanildi`);
+
+      // 3. ESC/POS Image object yaratish
+      escpos.Image.load(imageBuffer, (image) => {
+        try {
+          console.log("🖼️ ESC/POS image yaratildi:", {
+            width: image.width,
+            height: image.height,
+          });
+
+          // 4. Image'ni print qilish
+          printer
+            .align("CT") // Center align
+            .raster(image, "dw") // Double width agar kerak bo'lsa
+            .feed(2) // 2 ta bo'sh qator
+            .cut() // Paper cut
+            .close(); // Connection close
+
+          console.log("✅ HTML to Image print muvaffaqiyatli yuborildi");
+
+          res.json({
+            success: true,
+            message: "HTML to Image print muvaffaqiyatli yuborildi!",
+            printer_ip: printerIP,
+            image_info: {
+              width: image.width,
+              height: image.height,
+              originalSize: imageBuffer.length,
+            },
+          });
+        } catch (imageError) {
+          console.error("❌ ESC/POS image processing error:", imageError);
+          printer.close();
+          res.status(500).json({
+            success: false,
+            message: "Image processing xatoligi",
+            error: imageError.message,
+          });
+        }
+      });
+    });
+  } catch (error) {
+    console.error("❌ HTML to Image print error:", error);
+    res.status(500).json({
+      success: false,
+      message: "HTML to Image print xatoligi",
+      error: error.message,
+    });
+  }
+};
+
 // ✅ Kassir printer test
 const testKassirPrinter = async (req, res) => {
   try {
@@ -322,10 +431,6 @@ const testKassirPrinter = async (req, res) => {
         message: "Kassir printer IP sozlanmagan",
       });
     }
-
-    // Test chek ma'lumotlarini olish
-    const testReceiptResponse = await generateTestReceipt(req, res);
-    if (!testReceiptResponse) return; // generateTestReceipt o'z response'ini yuboradi
 
     console.log(
       `🖨️ Kassir printer (${settings.kassir_printer_ip}) test qilinmoqda...`
@@ -429,7 +534,7 @@ const getSettingsInfo = async (req, res) => {
   }
 };
 
-// EXPORT
+// ✅ EXPORT (printImageReceipt qo'shildi)
 module.exports = {
   getSettings,
   createSettings,
@@ -438,6 +543,7 @@ module.exports = {
   deleteLogo,
   resetToDefault,
   generateTestReceipt,
+  printImageReceipt, // ✅ YANGI endpoint
   testKassirPrinter,
   getKassirPrinterStatus,
   getSettingsInfo,

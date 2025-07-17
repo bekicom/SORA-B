@@ -1,12 +1,14 @@
-const escpos = require("escpos");
-escpos.Network = require("escpos-network");
+const net = require("net");
 
 function initPrinterServer(app) {
-  // ✅ Oshxona printeri (o'zgarishsiz)
+  // ✅ Oshxona printeri (ESC/POS - o'zgarishsiz)
   app.post("/print", async (req, res) => {
     try {
-      const { items, table_number, waiter_name, date, type } = req.body;
+      const { items, table_number, waiter_name, date } = req.body;
       const printerIp = req.body.printerIp || "192.168.0.106";
+
+      const escpos = require("escpos");
+      escpos.Network = require("escpos-network");
       const device = new escpos.Network(printerIp, 9100);
       const printer = new escpos.Printer(device);
 
@@ -55,281 +57,185 @@ function initPrinterServer(app) {
     }
   });
 
-  // ✅ YANGI YECHIM: Frontend HTML template'ini print qilish
+  // ✅ KASSIR CHEKI: Raw Socket (frontend format)
   app.post("/print-check", async (req, res) => {
     try {
-      const {
-        restaurant_name,
-        address,
-        phone,
-        email,
-        website,
-        logo,
-        order_number,
-        formatted_order_number,
-        table_number,
-        table_display,
-        waiter_name,
-        date,
-        items,
-        subtotal,
-        service_percent,
-        service_amount,
-        tax_percent,
-        tax_amount,
-        total_amount,
-        currency,
-        footer_text,
-        font_size,
-        font_family,
-        text_color,
-        show_qr,
-        kassir_printer_ip,
-      } = req.body;
+      const receiptData = req.body;
 
-      console.log("🧾 HTML template kassir cheki:", {
-        restaurant_name,
-        order_number: order_number || formatted_order_number,
-        kassir_printer_ip,
-        total_amount,
+      console.log("🧾 Raw Socket kassir cheki:", {
+        restaurant_name: receiptData.restaurant_name,
+        order_number:
+          receiptData.order_number || receiptData.formatted_order_number,
+        kassir_printer_ip: receiptData.kassir_printer_ip,
+        total_amount: receiptData.total_amount,
       });
 
-      const kassirIp = kassir_printer_ip || "192.168.0.106";
+      const printerIP = receiptData.kassir_printer_ip || "192.168.0.106";
+      const printerPort = 9100;
 
-      // ✅ Frontend HTML template yaratish
-      const receiptHTML = generateReceiptHTML({
-        restaurant_name: restaurant_name || "SORA",
-        phone: phone || "+998 90 123 45 67",
-        address: address || "Toshkent sh., Yunusobod tumani",
-        website,
-        logo,
-        date: date || new Date().toLocaleString("uz-UZ"),
-        waiter_name: waiter_name || "Natalya",
-        table_display: table_display || table_number || "A1",
-        guests: 2,
-        items: items || [],
-        subtotal: subtotal || 0,
-        service_percent: service_percent || 10,
-        service_amount: service_amount || 0,
-        tax_percent: tax_percent || 12,
-        tax_amount: tax_amount || 0,
-        total_amount: total_amount || 0,
-        currency: currency || "UZS",
-        footer_text: footer_text || "RAHMAT! Yana tashrif buyuring!",
-        font_size: font_size || 14,
-        font_family: font_family || "Arial",
-        text_color: text_color || "#000000",
-        show_qr: show_qr || false,
+      // ✅ Raw text content yaratish (frontend format)
+      const rawContent = generateRawReceiptContent(receiptData);
+
+      // ✅ Direct socket connection
+      const client = new net.Socket();
+
+      client.connect(printerPort, printerIP, () => {
+        console.log(`✅ Raw socket ulanildi: ${printerIP}:${printerPort}`);
+
+        // Raw content yuborish
+        client.write(rawContent);
+        client.end();
+
+        res.json({
+          message: "✅ Raw socket orqali chiqarildi!",
+          method: "raw_socket",
+          printer_ip: printerIP,
+          order_number:
+            receiptData.order_number || receiptData.formatted_order_number,
+        });
       });
 
-      // ✅ HTML ni thermal printer format'iga convert qilish
-      const device = new escpos.Network(kassirIp, 9100);
-      const printer = new escpos.Printer(device);
-
-      device.open(function (err) {
-        if (err) {
-          console.error(`❌ Kassir printeriga ulanib bo'lmadi:`, err.message);
-          return res.status(400).json({
-            message: `❌ Kassir printeriga ulanishda xatolik`,
-            error: err.message,
-            printer_ip: kassirIp,
-          });
-        }
-
-        // ✅ HTML content'ini thermal format'iga convert
-        printHTMLContent(printer, {
-          restaurant_name: restaurant_name || "SORA",
-          phone: phone || "+998 90 123 45 67",
-          address: address || "Toshkent sh., Yunusobod tumani",
-          date: date || new Date().toLocaleString("uz-UZ"),
-          waiter_name: waiter_name || "Natalya",
-          table_display: table_display || table_number || "A1",
-          items: items || [],
-          subtotal: subtotal || 0,
-          service_percent: service_percent || 10,
-          service_amount: service_amount || 0,
-          tax_percent: tax_percent || 12,
-          tax_amount: tax_amount || 0,
-          total_amount: total_amount || 0,
-          currency: currency || "UZS",
-          footer_text: footer_text || "RAHMAT!",
-          show_qr: show_qr || false,
+      client.on("error", (err) => {
+        console.error("❌ Raw socket xatosi:", err.message);
+        res.status(500).json({
+          message: "❌ Raw socket xatosi",
+          error: err.message,
+          printer_ip: printerIP,
         });
+      });
 
-        return res.json({
-          message: "✅ HTML template kassir cheki chiqarildi!",
-          printer_ip: kassirIp,
-          order_number: order_number || formatted_order_number,
-          html: receiptHTML.substring(0, 200) + "...", // Debug uchun
-        });
+      client.on("close", () => {
+        console.log(`✅ Raw socket ulanish yopildi: ${printerIP}`);
       });
     } catch (err) {
-      console.error("❌ HTML template cheki xatosi:", err.message);
+      console.error("❌ Raw socket service xatosi:", err.message);
       res.status(500).json({
-        message: "❌ HTML template chekini chiqarishda xatolik",
+        message: "❌ Raw socket service xatosi",
         error: err.message,
       });
     }
   });
 }
 
-// ✅ Frontend kabi HTML template yaratish
-function generateReceiptHTML(data) {
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body { 
-      font-family: ${data.font_family}; 
-      font-size: ${data.font_size}px; 
-      color: ${data.text_color}; 
-      width: 350px; 
-      margin: 0; 
-      padding: 16px;
-      line-height: 1.4;
-    }
-    .header { text-align: center; margin-bottom: 16px; }
-    .restaurant-name { font-size: ${data.font_size + 4}px; font-weight: bold; }
-    .contact-info { font-size: ${data.font_size - 1}px; }
-    .order-info { margin-bottom: 12px; font-size: ${data.font_size - 1}px; }
-    .items-table { width: 100%; margin-bottom: 12px; }
-    .items-header { font-weight: bold; font-size: ${data.font_size - 1}px; }
-    .item-row { font-size: ${data.font_size - 1}px; margin-top: 4px; }
-    .totals { font-size: ${data.font_size - 1}px; }
-    .total-final { font-weight: bold; font-size: ${data.font_size}px; }
-    .qr-section { text-align: center; margin-top: 16px; }
-    .footer { text-align: center; margin-top: 16px; font-size: ${
-      data.font_size - 2
-    }px; }
-  </style>
-</head>
-<body>
-  <div class="header">
-    <div class="restaurant-name">${data.restaurant_name}</div>
-    <div class="contact-info">${data.phone}</div>
-    <div class="contact-info">${data.address}</div>
-    ${data.website ? `<div class="contact-info">${data.website}</div>` : ""}
-  </div>
-  
-  <div class="order-info">
-    <div>Дата: ${data.date}</div>
-    <div>Официант: ${data.waiter_name}</div>
-    <div>Стол: ${data.table_display}</div>
-    <div>Гостей: ${data.guests}</div>
-  </div>
-  
-  <div class="items-table">
-    <div class="items-header">
-      <span style="display: inline-block; width: 50%;">Наименование</span>
-      <span style="display: inline-block; width: 25%; text-align: center;">Кол</span>
-      <span style="display: inline-block; width: 25%; text-align: right;">Сумма</span>
-    </div>
-    ${data.items
-      .map(
-        (item) => `
-      <div class="item-row">
-        <span style="display: inline-block; width: 50%;">${item.name}</span>
-        <span style="display: inline-block; width: 25%; text-align: center;">${
-          item.quantity
-        }</span>
-        <span style="display: inline-block; width: 25%; text-align: right;">${item.price.toLocaleString()}</span>
-      </div>
-    `
-      )
-      .join("")}
-  </div>
-  
-  <div class="totals">
-    <div>Сумма: ${data.subtotal.toLocaleString()} ${data.currency}</div>
-    <div>Обслуживание (${
-      data.service_percent
-    }%): ${data.service_amount.toLocaleString()} ${data.currency}</div>
-    <div>Налог (${data.tax_percent}%): ${data.tax_amount.toLocaleString()} ${
-    data.currency
-  }</div>
-    <div class="total-final">ИТОГО: ${data.total_amount.toLocaleString()} ${
-    data.currency
-  }</div>
-  </div>
-  
-  ${data.show_qr ? '<div class="qr-section">[QR КОД]</div>' : ""}
-  
-  ${data.footer_text ? `<div class="footer">${data.footer_text}</div>` : ""}
-</body>
-</html>`;
-}
+// ✅ Raw content generator (PROFESSIONAL 58mm format - 2-chi rasmdagi kabi)
+function generateRawReceiptContent(data) {
+  const {
+    restaurant_name = "SORA",
+    phone = "+998 90 123 45 67",
+    address = "Toshkent sh., Yunusobod tumani",
+    website = "",
+    date = new Date().toLocaleString("uz-UZ"),
+    waiter_name = "Natalya",
+    table_display = "A1",
+    guests = 2,
+    items = [],
+    subtotal = 0,
+    service_percent = 10,
+    service_amount = 0,
+    tax_percent = 12,
+    tax_amount = 0,
+    total_amount = 0,
+    currency = "UZS",
+    footer_text = "RAHMAT! Yana tashrif buyuring!",
+    show_qr = false,
+    order_number = "#001",
+  } = data;
 
-// ✅ HTML content'ini thermal printer format'iga convert
-function printHTMLContent(printer, data) {
-  printer.encode("UTF-8");
+  // ✅ ESC/POS komandalar
+  const ESC = "\x1B";
+  const ALIGN_CENTER = ESC + "a1";
+  const ALIGN_LEFT = ESC + "a0";
+  const ALIGN_RIGHT = ESC + "a2";
+  const BOLD_ON = ESC + "E1";
+  const BOLD_OFF = ESC + "E0";
+  const SIZE_NORMAL = ESC + "!0";
+  const SIZE_DOUBLE = ESC + "!1";
+  const CUT = ESC + "d3" + ESC + "i";
+  const INIT = ESC + "@";
 
-  // Header
-  printer
-    .align("CT")
-    .size(2, 1)
-    .text(data.restaurant_name)
-    .size(1, 1)
-    .text(data.phone)
-    .text(data.address)
-    .text("");
+  let content = "";
 
-  // Order info
-  printer
-    .align("LT")
-    .text(`Data: ${data.date}`)
-    .text(`Ofitsiant: ${data.waiter_name}`)
-    .text(`Stol: ${data.table_display}`)
-    .text(`Gostey: 2`)
-    .text("");
+  // ✅ Initialize printer
+  content += INIT;
 
-  // Items header
-  printer.text("Naimenovanie      Kol  Summa");
+  // ✅ PROFESSIONAL Header (2-chi rasmdagi kabi)
+  content += ALIGN_CENTER + SIZE_DOUBLE + BOLD_ON;
+  content += restaurant_name + "\n";
+  content += SIZE_NORMAL + BOLD_OFF;
+  content += phone + "\n";
+  content += address + "\n";
+  if (website) content += website + "\n";
+  content += "\n";
 
-  // Items
-  data.items.forEach((item) => {
-    const name = item.name.substring(0, 17).padEnd(17);
-    const qty = item.quantity.toString().padStart(2);
-    const price = item.price.toLocaleString().padStart(6);
-    printer.text(`${name} ${qty}  ${price}`);
+  // ✅ Order info (2-chi rasmdagi kabi format)
+  content += ALIGN_LEFT;
+  content += `Zakaz: ${order_number}\n`;
+  content += `Vaqt: ${date}\n`;
+  content += `Ofitsiant: ${waiter_name}\n`;
+  content += `Stol: ${table_display}\n`;
+  content += `Gostey: ${guests}\n`;
+  content += "\n";
+
+  // ✅ Items section (2-chi rasmdagi kabi professional table)
+  content += "Bludo    Kol    Summa\n";
+  content += "--------\n";
+
+  // ✅ Items list (2-chi rasmdagi kabi spacing)
+  items.forEach((item) => {
+    const name = (item.name || "Unknown").substring(0, 20).padEnd(20);
+    const qty = (item.quantity || 1).toString().padStart(3);
+    const price = formatPriceNormal(item.price || 0).padStart(8);
+    content += `${name} ${qty}  ${price}\n`;
   });
 
-  printer.text("");
+  content += "\n";
 
-  // Totals
-  printer
-    .text(
-      `Summa:               ${data.subtotal.toLocaleString()} ${data.currency}`
-    )
-    .text(
-      `Obsluzhivanie (${
-        data.service_percent
-      }%):  ${data.service_amount.toLocaleString()} ${data.currency}`
-    )
-    .text(
-      `Nalog (${
-        data.tax_percent
-      }%):        ${data.tax_amount.toLocaleString()} ${data.currency}`
-    )
-    .text("")
-    .size(1, 2)
-    .text(
-      `ITOGO:         ${data.total_amount.toLocaleString()} ${data.currency}`
-    )
-    .size(1, 1);
+  // ✅ Totals section (2-chi rasmdagi kabi professional)
+  content += ALIGN_LEFT;
+  content += `Summa:                ${formatPriceNormal(subtotal)}.00\n`;
+  content += `Obsluzhivanie (${service_percent}%):     ${formatPriceNormal(
+    service_amount
+  )}.00\n`;
 
-  // QR code
-  if (data.show_qr) {
-    printer.text("").align("CT").text("[QR KOD]");
+  content += "--------\n";
+  content +=
+    BOLD_ON +
+    `ITOGO:            ${formatPriceNormal(total_amount)}.00\n` +
+    BOLD_OFF;
+  content += "\n";
+
+  // ✅ QR code (2-chi rasmdagi kabi)
+  if (show_qr) {
+    content += ALIGN_CENTER;
+    content += "[QR KOD]\n";
+    content += "\n";
   }
 
-  // Footer
-  if (data.footer_text) {
-    printer.text("").align("CT").text(data.footer_text);
+  // ✅ Footer (2-chi rasmdagi kabi professional)
+  content += ALIGN_CENTER;
+  if (footer_text) {
+    const footerLines = footer_text.split("\n");
+    footerLines.forEach((line) => {
+      content += line + "\n";
+    });
   }
 
-  printer.cut().close();
+
+  // ✅ Cut paper
+  content += CUT;
+
+  return content;
+}
+
+// ✅ Professional price formatting (2-chi rasmdagi kabi)
+function formatPriceNormal(price) {
+  if (price >= 1000) {
+    return (
+      Math.floor(price / 1000) + " " + String(price % 1000).padStart(3, "0")
+    );
+  } else {
+    return price.toString();
+  }
 }
 
 module.exports = initPrinterServer;

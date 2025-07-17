@@ -42,7 +42,6 @@ const printReceiptToKassir = async (receiptData) => {
   try {
     console.log("🧾 Kassir cheki chiqarilmoqda...");
 
-    // ✅ SETTINGS dan kassir printer IP olish
     const settings = await Settings.findOne({ is_active: true }).populate(
       "kassir_printer_id"
     );
@@ -60,7 +59,7 @@ const printReceiptToKassir = async (receiptData) => {
         kassir_printer_ip: kassirPrinterIp,
       },
       {
-        timeout: 10000, // ✅ Timeout oshirildi
+        timeout: 10000,
         headers: {
           "Content-Type": "application/json",
         },
@@ -85,18 +84,15 @@ const printReceiptToKassir = async (receiptData) => {
   }
 };
 
-// 🧾 ZAKASNI YOPISH VA AVTOMATIK CHEK CHIQARISH (ENHANCED)
+// ✅ ZAKASNI YOPISH - KASSIR WORKFLOW (CHEK CHIQARMASLIK)
 const closeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-
-    console.log("🔒 Zakaz yopilmoqda:", orderId);
-
-    // ✅ Order ni populate bilan topish (user va table bilan items)
+    const userId = req.user?.id; // Qaysi ofitsiant yopyapti
     const order = await Order.findById(orderId)
       .populate("user_id")
       .populate("table_id")
-      .populate("items.food_id"); // ✅ Items ham populate qilingan
+      .populate("items.food_id");
 
     if (!order) {
       return res.status(404).json({
@@ -105,31 +101,18 @@ const closeOrder = async (req, res) => {
       });
     }
 
-    if (order.status === "closed") {
+    // ✅ Status tekshirish (completed/paid/cancelled emas)
+    if (["completed", "paid", "cancelled"].includes(order.status)) {
       return res.status(400).json({
         success: false,
-        message: "Zakaz allaqachon yopilgan",
+        message: `Zakaz allaqachon ${order.status} holatida`,
       });
     }
 
-    // ✅ Settings ni kassir printer bilan olish
     const settings = await Settings.findOne({ is_active: true }).populate(
       "kassir_printer_id"
     );
 
-    if (!settings) {
-      console.warn("⚠️ Settings topilmadi, default qiymatlar ishlatiladi");
-    }
-
-    console.log("📋 Settings info:", {
-      kassir_printer_configured: !!settings?.kassir_printer_id,
-      auto_print_enabled: settings?.auto_print_receipt,
-      print_copies: settings?.print_receipt_copies,
-      kassir_printer_name: settings?.kassir_printer_id?.name,
-      kassir_printer_ip: settings?.kassir_printer_ip,
-    });
-
-    // User va Table ma'lumotlari
     const waiter = order.user_id;
     const table = order.table_id;
 
@@ -137,19 +120,19 @@ const closeOrder = async (req, res) => {
       order_id: order._id,
       daily_number: order.daily_order_number,
       formatted_number: order.formatted_order_number,
+      current_status: order.status,
       table_name: table?.name,
-      table_number: table?.number,
       waiter_name: waiter?.first_name,
       items_count: order.items?.length,
     });
 
-    // 💰 Summalarni hisoblash
+    // 💰 Financial calculations
     const subtotal = order.total_price;
     const servicePercent = settings?.service_percent || 10;
     const taxPercent = settings?.tax_percent || 12;
 
     const serviceAmount = Math.round((subtotal * servicePercent) / 100);
-    const taxAmount = Math.round((subtotal * taxPercent) / 100);
+    const taxAmount = 0;
     const totalAmount = subtotal + serviceAmount + taxAmount;
 
     console.log("💰 Financial calculations:", {
@@ -160,18 +143,15 @@ const closeOrder = async (req, res) => {
       taxAmount,
       totalAmount,
     });
-
-    // ✅ Order ni yopish
-    order.status = "closed";
-    order.closedAt = new Date();
+    order.status = "completed"; // "closed" emas!
+    order.completedAt = new Date();
+    order.completedBy = userId;
+    order.closedAt = order.completedAt; // Backward compatibility
     order.service_amount = serviceAmount;
     order.tax_amount = taxAmount;
     order.final_total = totalAmount;
     await order.save();
-
-    console.log("✅ Order yopildi va saqlandi");
-
-    // 🆕 Table display info
+    // Table display info
     const tableDisplayInfo = table
       ? {
           id: table._id,
@@ -185,245 +165,31 @@ const closeOrder = async (req, res) => {
           number: order.table_number || "Noma'lum",
           display_name: order.table_number || "Noma'lum",
         };
-
-    // 📋 Chek ma'lumotlarini tayyorlash (Enhanced)
-    const receiptData = {
-      // Restaurant info
-      restaurant_name: settings?.restaurant_name || "SORA RESTAURANT",
-      address: settings?.address || "",
-      phone: settings?.phone || "",
-      email: settings?.email || "",
-      website: settings?.website || "",
-
-      // ✅ Order info (daily number + table info)
-      order_id: order._id.toString(),
-      daily_order_number: order.daily_order_number,
-      formatted_order_number:
-        order.formatted_order_number ||
-        `#${String(order.daily_order_number || 1).padStart(3, "0")}`,
-
-      // ✅ Table info (number instead of ID)
-      table_id: tableDisplayInfo.id,
-      table_name: tableDisplayInfo.name,
-      table_number: tableDisplayInfo.number,
-      table_display: tableDisplayInfo.display_name,
-
-      // Date info
-      date: new Date().toLocaleString("uz-UZ"),
-      closed_at: order.closedAt.toLocaleString("uz-UZ"),
-      order_date: order.order_date || new Date().toISOString().split("T")[0],
-
-      // ✅ Waiter info
-      waiter_name: waiter?.first_name || order.waiter_name || "Afitsant",
-      waiter_id: waiter?._id,
-
-      // ✅ Items (enhanced with safety checks)
-      items: (order.items || []).map((item) => ({
-        name: item.name || "Unknown Item",
-        quantity: item.quantity || 1,
-        price: item.price || 0,
-        total: (item.quantity || 1) * (item.price || 0),
-        category: item.category_name || "Unknown Category",
-      })),
-
-      // Calculations
-      subtotal: subtotal,
-      service_percent: servicePercent,
-      service_amount: serviceAmount,
-      tax_percent: taxPercent,
-      tax_amount: taxAmount,
-      total_amount: totalAmount,
-
-      // Settings
-      currency: settings?.currency || "UZS",
-      footer_text: settings?.footer_text || "Rahmat! Yana tashrif buyuring!",
-      show_qr: settings?.show_qr || false,
-
-      // Print settings
-      type: "receipt",
-      kassir_printer_ip: settings?.kassir_printer_ip,
-
-      // ✅ Additional metadata
-      print_time: new Date().toISOString(),
-      receipt_number: `RCP-${
-        order.daily_order_number || order._id.toString().slice(-6)
-      }`,
-    };
-
-    console.log("📋 Receipt data prepared:", {
-      order_number: receiptData.formatted_order_number,
-      table_display: receiptData.table_display,
-      total_amount: receiptData.total_amount,
-      items_count: receiptData.items.length,
-      kassir_printer_ip: receiptData.kassir_printer_ip,
-    });
-
-    // 🧾 AVTOMATIK KASSIR CHEKINI CHIQARISH (Enhanced)
-    let receiptResults = [];
-    let totalPrintSuccess = 0;
-    let printEnabled = false;
-
-    // ✅ Print settings validation
-    if (settings?.auto_print_receipt) {
-      if (settings?.kassir_printer_ip && settings?.kassir_printer_id) {
-        printEnabled = true;
-        console.log(
-          "🖨️ Avtomatik print yoqilgan va printer konfiguratsiya qilingan"
-        );
-      } else {
-        console.warn(
-          "⚠️ Auto print yoqilgan lekin kassir printer to'liq konfiguratsiya qilinmagan"
-        );
-      }
-    } else {
-      console.log("ℹ️ Avtomatik print o'chirilgan");
-    }
-
-    if (printEnabled) {
-      console.log("🖨️ Kassir cheki chiqarilmoqda...");
-
-      const printCopies = Math.max(
-        1,
-        Math.min(5, settings?.print_receipt_copies || 1)
-      ); // ✅ Safety bounds
-
-      for (let copy = 1; copy <= printCopies; copy++) {
-        try {
-          const copyReceiptData = {
-            ...receiptData,
-            copy_number: copy,
-            total_copies: printCopies,
-            print_time: new Date().toISOString(),
-          };
-
-          console.log(`🖨️ Printing copy ${copy}/${printCopies}...`);
-          const receiptResult = await printReceiptToKassir(copyReceiptData);
-
-          receiptResults.push({
-            copy_number: copy,
-            success: receiptResult.success,
-            error: receiptResult.error || null,
-            printer_ip: receiptResult.printer_ip || settings.kassir_printer_ip,
-            printer_name: settings.kassir_printer_id?.name || "Kassir Printer",
-            print_time: new Date().toISOString(),
-          });
-
-          if (receiptResult.success) {
-            totalPrintSuccess++;
-            console.log(
-              `✅ Kassir cheki nusxasi ${copy}/${printCopies} muvaffaqiyatli chiqarildi`
-            );
-          } else {
-            console.error(
-              `❌ Kassir cheki nusxasi ${copy}/${printCopies} xatolik:`,
-              receiptResult.error
-            );
-          }
-
-          // ✅ Nusxalar orasida pauza (faqat ko'p nusxa bo'lsa)
-          if (copy < printCopies && printCopies > 1) {
-            await new Promise((resolve) => setTimeout(resolve, 1000));
-          }
-        } catch (receiptError) {
-          console.error(
-            `❌ Kassir cheki nusxasi ${copy} chiqarishda xatolik:`,
-            receiptError
-          );
-          receiptResults.push({
-            copy_number: copy,
-            success: false,
-            error: receiptError.message,
-            printer_ip: settings?.kassir_printer_ip,
-            printer_name: settings?.kassir_printer_id?.name || "Kassir Printer",
-            print_time: new Date().toISOString(),
-          });
-        }
-      }
-
-      console.log(
-        `📊 Print results: ${totalPrintSuccess}/${printCopies} successful`
-      );
-    } else {
-      // ✅ Manual fallback (always attempt)
-      console.log("🔄 Manual fallback print attempt...");
-      try {
-        const manualResult = await printReceiptToKassir(receiptData);
-        receiptResults.push({
-          copy_number: 1,
-          success: manualResult.success,
-          error: manualResult.error || null,
-          printer_ip: manualResult.printer_ip || receiptData.kassir_printer_ip,
-          printer_name: "Manual Print",
-          note: "Auto print disabled - manual fallback",
-          print_time: new Date().toISOString(),
-        });
-
-        if (manualResult.success) {
-          totalPrintSuccess = 1;
-          console.log("✅ Manual fallback print successful");
-        } else {
-          console.error("❌ Manual fallback print failed:", manualResult.error);
-        }
-      } catch (manualError) {
-        console.error("❌ Manual fallback print error:", manualError);
-        receiptResults.push({
-          copy_number: 1,
-          success: false,
-          error: manualError.message,
-          printer_ip: receiptData.kassir_printer_ip,
-          printer_name: "Manual Print",
-          note: "Manual fallback failed",
-          print_time: new Date().toISOString(),
-        });
-      }
-    }
-
-    console.log("✅ Zakaz to'liq yopildi:", order.formatted_order_number);
-
-    // ✅ Enhanced Response (frontend uchun to'liq ma'lumotlar)
+    // ✅ Response (CHEK CHIQARILMAGAN)
     const response = {
       success: true,
-      message:
-        totalPrintSuccess > 0
-          ? `Zakaz yopildi va ${totalPrintSuccess} ta chek chiqarildi`
-          : "Zakaz yopildi (chek chiqarilmadi)",
+      message: "Zakaz yopildi va kassir bo'limiga yuborildi",
 
       order: {
         id: order._id,
         daily_order_number: order.daily_order_number,
-        formatted_order_number:
-          order.formatted_order_number ||
-          `#${String(order.daily_order_number || 1).padStart(3, "0")}`,
-        status: order.status,
-        closed_at: order.closedAt,
+        formatted_order_number: order.formatted_order_number,
+        status: order.status, // "completed"
+        completed_at: order.completedAt,
+        completed_by: waiter?.first_name,
         service_amount: serviceAmount,
         tax_amount: taxAmount,
         final_total: totalAmount,
         order_date: order.order_date,
       },
-
       table: tableDisplayInfo,
-
-      receipt: {
-        printed: totalPrintSuccess > 0,
-        total_copies: receiptResults.length,
-        successful_copies: totalPrintSuccess,
-        failed_copies: receiptResults.length - totalPrintSuccess,
-        auto_print_enabled: settings?.auto_print_receipt || false,
-
-        kassir_printer: settings?.kassir_printer_id
-          ? {
-              id: settings.kassir_printer_id._id,
-              name: settings.kassir_printer_id.name,
-              ip: settings.kassir_printer_id.ip || settings.kassir_printer_ip,
-              status: settings.kassir_printer_id.status || "unknown",
-            }
-          : null,
-
-        print_results: receiptResults,
-        data: receiptData,
+      kassir_workflow: {
+        enabled: true,
+        status: "pending_payment",
+        next_step: "Kassir to'lov qabul qilishi kerak",
+        receipt_printed: false,
+        auto_print_disabled: true, // ✅ Avtomatik print o'chirilgan
       },
-
       totals: {
         subtotal,
         service: `${servicePercent}% = ${serviceAmount}`,
@@ -432,18 +198,16 @@ const closeOrder = async (req, res) => {
         currency: settings?.currency || "UZS",
       },
 
-      // ✅ Debug info
       debug: {
-        settings_found: !!settings,
-        auto_print_configured: printEnabled,
-        print_attempts: receiptResults.length,
+        workflow: "kassir_enabled",
+        auto_print: false,
         timestamp: new Date().toISOString(),
       },
     };
 
     res.status(200).json(response);
   } catch (err) {
-    console.error("❌ Zakaz yopishda kritik xatolik:", err);
+    console.error("❌ Zakaz yopishda xatolik:", err);
     res.status(500).json({
       success: false,
       message: "Zakaz yopishda xatolik",
@@ -451,23 +215,23 @@ const closeOrder = async (req, res) => {
       debug: {
         orderId: req.params.orderId,
         timestamp: new Date().toISOString(),
-        stack: process.env.NODE_ENV === "development" ? err.stack : undefined,
       },
     });
   }
 };
 
-// 🧾 ALOHIDA CHEK CHIQARISH ENDPOINT (Enhanced)
-const printReceipt = async (req, res) => {
+// ✅ KASSIR UCHUN CHEK CHIQARISH (Manual)
+const printReceiptForKassir = async (req, res) => {
   try {
     const { orderId } = req.params;
+    const userId = req.user?.id; // Qaysi kassir chek chiqaryapti
 
-    console.log("🧾 Manual chek chiqarish:", orderId);
+    console.log("🧾 Kassir chek chiqarish:", orderId);
 
-    // ✅ Order ni populate bilan topish
     const order = await Order.findById(orderId)
       .populate("user_id")
-      .populate("table_id");
+      .populate("table_id")
+      .populate("completedBy", "first_name last_name");
 
     if (!order) {
       return res.status(404).json({
@@ -476,19 +240,21 @@ const printReceipt = async (req, res) => {
       });
     }
 
-    // ✅ Settings va printer info
+    // ✅ Faqat completed/paid status'dagi zakaz'lar uchun
+    if (!["completed", "paid"].includes(order.status)) {
+      return res.status(400).json({
+        success: false,
+        message: "Faqat yopilgan zakaz'lar uchun chek chiqarish mumkin",
+        current_status: order.status,
+      });
+    }
+
     const settings = await Settings.findOne({ is_active: true }).populate(
       "kassir_printer_id"
     );
     const waiter = order.user_id;
     const table = order.table_id;
 
-    // Summalarni hisoblash
-    const subtotal = order.final_total || order.total_price;
-    const serviceAmount = order.service_amount || 0;
-    const taxAmount = order.tax_amount || 0;
-
-    // Table info
     const tableDisplayInfo = table
       ? {
           number: table.number || table.name,
@@ -499,26 +265,23 @@ const printReceipt = async (req, res) => {
           display_name: order.table_number || "Noma'lum",
         };
 
-    // ✅ Enhanced receipt data
+    // ✅ Receipt data preparation
     const receiptData = {
       restaurant_name: settings?.restaurant_name || "SORA RESTAURANT",
       address: settings?.address || "",
       phone: settings?.phone || "",
       email: settings?.email || "",
+      website: settings?.website || "",
 
-      // ✅ Order info with daily number
       order_id: order._id.toString(),
       daily_order_number: order.daily_order_number,
-      formatted_order_number:
-        order.formatted_order_number ||
-        `#${String(order.daily_order_number || 1).padStart(3, "0")}`,
+      formatted_order_number: order.formatted_order_number,
 
-      // ✅ Table info
       table_number: tableDisplayInfo.number,
       table_display: tableDisplayInfo.display_name,
 
-      date: order.closedAt
-        ? order.closedAt.toLocaleString("uz-UZ")
+      date: order.completedAt
+        ? order.completedAt.toLocaleString("uz-UZ")
         : new Date().toLocaleString("uz-UZ"),
       waiter_name: waiter?.first_name || order.waiter_name || "Afitsant",
 
@@ -530,50 +293,387 @@ const printReceipt = async (req, res) => {
       })),
 
       subtotal: order.total_price,
-      service_amount: serviceAmount,
-      tax_amount: taxAmount,
-      total_amount: subtotal,
+      service_amount: order.service_amount || 0,
+      tax_amount: order.tax_amount || 0,
+      total_amount: order.final_total || order.total_price,
 
       currency: settings?.currency || "UZS",
       footer_text: settings?.footer_text || "Rahmat!",
-      type: "receipt_reprint",
+      show_qr: settings?.show_qr || false,
+      type: "kassir_receipt",
 
-      // ✅ Reprint metadata
-      reprint_time: new Date().toISOString(),
+      // ✅ Kassir metadata
+      printed_by_kassir: true,
+      print_time: new Date().toISOString(),
       kassir_printer_ip: settings?.kassir_printer_ip,
     };
 
-    console.log("🖨️ Manual print attempt:", {
+    console.log("🖨️ Kassir chek chiqarish:", {
       order_number: receiptData.formatted_order_number,
-      kassir_printer: settings?.kassir_printer_id?.name,
       printer_ip: settings?.kassir_printer_ip,
+      kassir_user: userId,
     });
 
     // Chekni chiqarish
     const receiptResult = await printReceiptToKassir(receiptData);
 
+    // ✅ Receipt print holati yangilash
+    if (receiptResult.success) {
+      await order.markReceiptPrinted(userId);
+      console.log("✅ Receipt printed status yangilandi");
+    }
+
     const response = {
       success: receiptResult.success,
       message: receiptResult.success
-        ? "Chek muvaffaqiyatli chiqarildi"
-        : "Chek chiqarishda xatolik",
+        ? "Kassir cheki muvaffaqiyatli chiqarildi"
+        : "Kassir cheki chiqarishda xatolik",
       error: receiptResult.error || null,
+
+      order: {
+        id: order._id,
+        number: order.formatted_order_number,
+        status: order.status,
+        total: order.final_total,
+        receipt_printed: receiptResult.success,
+      },
+
       printer: {
         ip: receiptResult.printer_ip,
-        name: settings?.kassir_printer_id?.name || "Default Printer",
+        name: settings?.kassir_printer_id?.name || "Kassir Printer",
       },
-      receipt_data: receiptData,
+
       timestamp: new Date().toISOString(),
     };
 
     res.status(200).json(response);
   } catch (err) {
-    console.error("❌ Manual chek chiqarishda xatolik:", err);
+    console.error("❌ Kassir chek chiqarishda xatolik:", err);
     res.status(500).json({
       success: false,
-      message: "Chek chiqarishda xatolik",
+      message: "Kassir chek chiqarishda xatolik",
       error: err.message,
+    });
+  }
+};
+
+// ✅ KASSIR WORKFLOW - To'lov qabul qilish
+const processPayment = async (req, res) => {
+  try {
+    const { orderId } = req.params;
+    const { paymentMethod, notes } = req.body;
+    const userId = req.user?.id; // Qaysi kassir to'lov qabul qilyapti
+
+    console.log("💰 To'lov qabul qilish:", { orderId, paymentMethod, userId });
+
+    // ✅ Order'ni topish
+    const order = await Order.findById(orderId)
+      .populate("user_id", "first_name last_name")
+      .populate("table_id", "name number")
+      .populate("completedBy", "first_name last_name");
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Zakaz topilmadi",
+      });
+    }
+
+    // ✅ Faqat completed holatidagi zakaz'lar uchun
+    if (order.status !== "completed") {
+      return res.status(400).json({
+        success: false,
+        message: "Faqat yopilgan zakaz'lar uchun to'lov qabul qilish mumkin",
+        current_status: order.status,
+      });
+    }
+
+    // ✅ Payment method validation
+    const validPaymentMethods = ["cash", "card", "transfer", "mixed"];
+    if (!validPaymentMethods.includes(paymentMethod)) {
+      return res.status(400).json({
+        success: false,
+        message: "Noto'g'ri to'lov usuli",
+        valid_methods: validPaymentMethods,
+      });
+    }
+
+    // ✅ To'lovni qayd qilish - Model method ishlatish
+    await order.processPayment(userId, paymentMethod, notes);
+
+    console.log("✅ To'lov muvaffaqiyatli qayd qilindi:", {
+      order_number: order.formatted_order_number,
+      payment_method: paymentMethod,
+      total: order.final_total,
+      kassir: userId,
+    });
+
+    // ✅ Response
+    const response = {
+      success: true,
+      message: "To'lov muvaffaqiyatli qabul qilindi",
+
+      order: {
+        id: order._id,
+        number: order.formatted_order_number,
+        status: order.status, // "paid"
+        total: order.final_total,
+        payment_method: order.paymentMethod,
+        paid_at: order.paidAt,
+        receipt_printed: order.receiptPrinted,
+      },
+
+      payment: {
+        method: paymentMethod,
+        amount: order.final_total,
+        currency: "UZS",
+        notes: notes || null,
+        processed_at: order.paidAt,
+        processed_by: userId,
+      },
+
+      waiter: {
+        name: order.user_id?.first_name,
+        completed_by: order.completedBy?.first_name,
+      },
+
+      table: {
+        number: order.table_id?.number || order.table_number,
+        name: order.table_id?.name,
+      },
+
       timestamp: new Date().toISOString(),
+    };
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error("❌ To'lov qabul qilishda xatolik:", err);
+    res.status(500).json({
+      success: false,
+      message: "To'lov qabul qilishda xatolik",
+      error: err.message,
+      debug: {
+        orderId: req.params.orderId,
+        timestamp: new Date().toISOString(),
+      },
+    });
+  }
+};
+
+const getCompletedOrders = async (req, res) => {
+  try {
+    const { date, paid, current_user_only } = req.query;
+    const userId = req.user?.id; // Current user ID
+
+    console.log("📋 Completed orders request:", {
+      date,
+      paid,
+      current_user_only,
+      userId,
+    });
+
+    const options = {
+      startDate: date || new Date().toISOString().split("T")[0],
+      endDate: date || new Date().toISOString().split("T")[0],
+      paid: paid !== undefined ? paid === "true" : undefined,
+      current_user_only: current_user_only === "true",
+      userId: userId,
+    };
+
+    // ✅ Query object yaratish
+    let query = {
+      order_date: { $gte: options.startDate, $lte: options.endDate },
+    };
+
+    // ✅ Agar current_user_only true bo'lsa, faqat shu user'ning zakaz'lari
+    if (options.current_user_only && userId) {
+      query.user_id = userId;
+      console.log("🔒 Faqat current user'ning zakaz'lari:", userId);
+    }
+
+    // ✅ Status filter
+    if (options.paid !== undefined) {
+      query.status = options.paid ? "paid" : "completed";
+    } else {
+      query.status = { $in: ["completed", "paid"] };
+    }
+
+    console.log("🔍 Final query:", query);
+
+    const orders = await Order.find(query)
+      .populate("user_id", "first_name last_name")
+      .populate("table_id", "name number")
+      .populate("completedBy", "first_name last_name")
+      .populate("paidBy", "first_name last_name")
+      .sort({ completedAt: -1 })
+      .limit(100);
+
+    console.log("🔍 Raw orders from database:", {
+      count: orders.length,
+      paid_param: paid,
+      current_user_only: options.current_user_only,
+      user_id: userId,
+      first_order: orders[0]
+        ? {
+            id: orders[0]._id,
+            status: orders[0].status,
+            user_id: orders[0].user_id,
+            waiter_name: orders[0].waiter_name,
+            formatted_number: orders[0].formatted_order_number,
+            table_number: orders[0].table_number,
+            total_price: orders[0].total_price,
+            final_total: orders[0].final_total,
+            items_length: orders[0].items?.length,
+          }
+        : null,
+    });
+
+    const response = {
+      success: true,
+      orders: orders.map((order) => ({
+        id: order._id, // ✅ MongoDB ID
+        orderNumber: order.formatted_order_number, // ✅ #041 format
+        tableNumber: order.table_number, // ✅ Stol raqami
+        waiterName: order.waiter_name, // ✅ Ofitsiant ismi
+        itemsCount: order.items?.length || 0, // ✅ Mahsulotlar soni
+        subtotal: order.total_price, // ✅ Subtotal
+        serviceAmount: order.service_amount || 0, // ✅ Xizmat haqi
+        taxAmount: order.tax_amount || 0, // ✅ Soliq
+        finalTotal: order.final_total || order.total_price, // ✅ Jami summa
+        completedAt: order.completedAt, // ✅ Yopilgan vaqt
+        paidAt: order.paidAt, // ✅ To'langan vaqt
+        status: order.status, // ✅ Status (completed/paid)
+        receiptPrinted: order.receiptPrinted || false, // ✅ Chek holati
+        paymentMethod: order.paymentMethod, // ✅ To'lov usuli
+        paidBy: order.paidBy?.first_name || "Kassir", // ✅ Kim to'lov qabul qilgan
+        completedBy: order.completedBy?.first_name || order.waiter_name, // ✅ Kim yopgan
+      })),
+      total_count: orders.length,
+      filter: {
+        date: options.startDate,
+        status:
+          options.paid === true
+            ? "paid"
+            : options.paid === false
+            ? "completed"
+            : "all",
+        current_user_only: options.current_user_only,
+        user_id: options.current_user_only ? userId : "all",
+      },
+      user_info: options.current_user_only
+        ? {
+            id: userId,
+            name: orders[0]?.waiter_name || "Afitsant",
+            today_orders: orders.length,
+            today_revenue: orders.reduce(
+              (sum, order) =>
+                sum + (order.final_total || order.total_price || 0),
+              0
+            ),
+          }
+        : null,
+      timestamp: new Date().toISOString(),
+    };
+
+    console.log("✅ Processed response:", {
+      orders_count: response.orders.length,
+      filter_status: response.filter.status,
+      current_user_only: response.filter.current_user_only,
+      user_orders: response.user_info?.today_orders || "all_users",
+      user_revenue: response.user_info?.today_revenue || "all_users",
+      completed_count: response.orders.filter((o) => o.status === "completed")
+        .length,
+      paid_count: response.orders.filter((o) => o.status === "paid").length,
+      first_processed_order: response.orders[0]
+        ? {
+            id: response.orders[0].id,
+            orderNumber: response.orders[0].orderNumber,
+            tableNumber: response.orders[0].tableNumber,
+            waiterName: response.orders[0].waiterName,
+            status: response.orders[0].status,
+            finalTotal: response.orders[0].finalTotal,
+          }
+        : null,
+    });
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error("❌ Completed orders olishda xatolik:", err);
+    res.status(500).json({
+      success: false,
+      message: "Completed orders olishda xatolik",
+      error: err.message,
+    });
+  }
+};
+
+const getPendingPayments = async (req, res) => {
+  try {
+    console.log("📊 Kassir dashboard - pending payments");
+
+    const orders = await Order.getPendingPayments();
+
+    const response = {
+      success: true,
+      pending_orders: orders.map((order) => ({
+        id: order._id,
+        _id: order._id,
+        orderNumber: order.formatted_order_number,
+        tableNumber: order.table_number,
+        waiterName: order.waiter_name,
+        itemsCount: order.items?.length || 0,
+        subtotal: order.total_price,
+        serviceAmount: order.service_amount || 0,
+        taxAmount: order.tax_amount || 0,
+        finalTotal: order.final_total || order.total_price,
+        completedAt: order.completedAt,
+        status: order.status,
+        receiptPrinted: order.receiptPrinted || false,
+        paymentMethod: order.paymentMethod,
+        kassirNotes: order.kassirNotes,
+      })),
+      total_pending: orders.length,
+      total_amount: orders.reduce(
+        (sum, order) => sum + (order.final_total || order.total_price || 0),
+        0
+      ),
+      currency: "UZS",
+      timestamp: new Date().toISOString(),
+    };
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error("❌ Pending payments olishda xatolik:", err);
+    res.status(500).json({
+      success: false,
+      message: "Pending payments olishda xatolik",
+      error: err.message,
+    });
+  }
+};
+
+// ✅ DAILY SALES SUMMARY
+const getDailySalesSummary = async (req, res) => {
+  try {
+    const { date } = req.query;
+    const targetDate = date || new Date().toISOString().split("T")[0];
+
+    console.log("📈 Daily sales summary:", targetDate);
+
+    const summary = await Order.getDailySalesSummary(targetDate);
+
+    res.status(200).json({
+      success: true,
+      date: targetDate,
+      summary,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.error("❌ Daily sales summary xatolik:", err);
+    res.status(500).json({
+      success: false,
+      message: "Daily sales summary xatolik",
+      error: err.message,
     });
   }
 };
@@ -590,7 +690,6 @@ const createOrder = async (req, res) => {
 
     const updatedItems = [];
 
-    // 🔍 Har bir item uchun ma'lumotlarni to'ldirish
     for (const item of items) {
       const { food_id, quantity } = item;
 
@@ -629,11 +728,9 @@ const createOrder = async (req, res) => {
       });
     }
 
-    // ✅ Table ma'lumotlarini olish
     const table = await Table.findById(table_id);
     const tableNumber = table?.number || table?.name || req.body.table_number;
 
-    // 💾 Zakazni saqlash (daily_order_number avtomatik generate bo'ladi)
     const newOrder = await Order.create({
       table_id,
       user_id,
@@ -738,7 +835,14 @@ const updateOrderStatus = async (req, res) => {
     const { orderId } = req.params;
     const { status } = req.body;
 
-    const allowedStatuses = ["pending", "preparing", "ready", "served"];
+    // ✅ Updated allowed statuses
+    const allowedStatuses = [
+      "pending",
+      "preparing",
+      "ready",
+      "served",
+      "completed",
+    ];
     if (!allowedStatuses.includes(status)) {
       return res.status(400).json({ message: "Noto'g'ri status" });
     }
@@ -794,6 +898,12 @@ const getMyPendingOrders = async (req, res) => {
   }
 };
 
+// ✅ Legacy printReceipt (backward compatibility)
+const printReceipt = async (req, res) => {
+  // Redirect to new kassir print function
+  return await printReceiptForKassir(req, res);
+};
+
 module.exports = {
   createOrder,
   getOrdersByTable,
@@ -803,4 +913,9 @@ module.exports = {
   getMyPendingOrders,
   closeOrder,
   printReceipt,
+  printReceiptForKassir,
+  processPayment,
+  getCompletedOrders,
+  getPendingPayments,
+  getDailySalesSummary,
 };
