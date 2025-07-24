@@ -73,45 +73,72 @@ router.delete(
 );
 
 // ===== ORDERS =====
-// Basic order operations
+// Asosiy order operatsiyalar
 router.post("/orders/create", authMiddleware, order.createOrder);
+router.put("/orders/update", authMiddleware, order.updateOrder);
 router.get("/orders/table/:tableId", authMiddleware, order.getOrdersByTable);
 router.put("/orders/status/:orderId", authMiddleware, order.updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, order.deleteOrder);
 router.get("/orders/busy-tables", authMiddleware, order.getBusyTables);
 router.get("/orders/my-pending", authMiddleware, order.getMyPendingOrders);
-// ✅ KASSIR WORKFLOW - To'lov qabul qilish
-router.post("/orders/process-payment/:orderId", authMiddleware, order.processPayment);
+router.get("/orders/all-active", authMiddleware, order.getAllActiveOrders);
 
-// ✅ KASSIR WORKFLOW ROUTES
-// Ofitsiant workflow
-router.put("/orders/close/:orderId", authMiddleware, order.closeOrder); // ✅ Updated - chek chiqarmaydi
-
-// Kassir workflow
-router.get("/orders/completed", authMiddleware, order.getCompletedOrders); // ✅ Kassir ro'yxati
+// ✅ KASSIR WORKFLOW - YANGI QATORLAR
+router.put("/orders/close/:orderId", authMiddleware, order.closeOrder);
+router.post(
+  "/orders/reopen/:orderId",
+  authMiddleware,
+  order.reopenOrderForPayment
+); // ✅ YANGI
+router.get("/orders/completed", authMiddleware, order.getCompletedOrders);
+router.get(
+  "/orders/completed-for-kassir",
+  authMiddleware,
+  order.getCompletedOrdersForKassir
+); // ✅ YANGI
 router.get(
   "/orders/pending-payments",
   authMiddleware,
   order.getPendingPayments
-); // ✅ To'lov kutilayotganlar
+);
 router.post(
   "/orders/kassir-print/:orderId",
   authMiddleware,
   order.printReceiptForKassir
-); // ✅ Kassir chek chiqarish
+);
 router.post(
   "/orders/process-payment/:orderId",
   authMiddleware,
   order.processPayment
-); // ✅ To'lov qabul qilish
-router.get("/orders/daily-sales", authMiddleware, order.getDailySalesSummary); // ✅ Kunlik hisobot
+);
+router.get("/orders/daily-sales", authMiddleware, order.getDailySalesSummary);
 
-// Legacy support (backward compatibility)
+// Legacy support
 router.post(
   "/orders/print-receipt/:orderId",
   authMiddleware,
   order.printReceipt
-); // ✅ Redirects to kassir print
+);
+
+// ✅ KASSIR DASHBOARD ROUTES - TUZATILGAN
+router.get(
+  "/kassir/pending-payments",
+  authMiddleware,
+  order.getPendingPayments
+);
+router.get("/kassir/orders", authMiddleware, order.getCompletedOrdersForKassir); // ✅ YANGI funksiya
+router.get("/kassir/sales-summary", authMiddleware, order.getDailySalesSummary);
+router.post(
+  "/kassir/print/:orderId",
+  authMiddleware,
+  order.printReceiptForKassir
+);
+router.post("/kassir/payment/:orderId", authMiddleware, order.processPayment);
+router.post(
+  "/kassir/reopen/:orderId",
+  authMiddleware,
+  order.reopenOrderForPayment
+); // ✅ YANGI
 
 // ===== PRINTERS =====
 router.post("/printers", authMiddleware, onlyAdmin, printer.createPrinter);
@@ -145,7 +172,7 @@ router.post(
   "/settings/upload-logo",
   authMiddleware,
   onlyAdmin,
-  upload.single("logo"), // ✅ Logo upload middleware
+  upload.single("logo"),
   setting.uploadLogo
 );
 router.delete("/settings/logo", authMiddleware, onlyAdmin, setting.deleteLogo);
@@ -174,7 +201,7 @@ router.get(
   setting.getKassirPrinterStatus
 );
 
-// ✅ HTML to Image Print endpoint
+// HTML to Image Print endpoint
 router.post("/api/print-image", authMiddleware, setting.printImageReceipt);
 
 // Backward compatibility
@@ -204,29 +231,19 @@ router.get(
   client.getClientByCardNumber
 );
 
-// ===== KASSIR DASHBOARD ROUTES =====
-// ✅ Kassir specific routes grouped together
-router.get("/kassir/dashboard", authMiddleware, order.getPendingPayments); // Kassir dashboard
-router.get("/kassir/orders", authMiddleware, order.getCompletedOrders); // Kassir orders list
-router.get("/kassir/sales-summary", authMiddleware, order.getDailySalesSummary); // Sales summary
-router.post(
-  "/kassir/print/:orderId",
-  authMiddleware,
-  order.printReceiptForKassir
-); // Kassir print
-router.post("/kassir/payment/:orderId", authMiddleware, order.processPayment); // Process payment
-
 // ===== HEALTH CHECK =====
 router.get("/health", (req, res) => {
   res.status(200).json({
     success: true,
     message: "API ishlayapti",
     timestamp: new Date().toISOString(),
-    version: "2.0.0", // ✅ Version updated for kassir workflow
+    version: "2.1.0",
     features: {
       kassir_workflow: true,
+      kassir_reopen_orders: true, // ✅ YANGI
       html_to_image_print: true,
       payment_processing: true,
+      mixed_payment: true,
     },
   });
 });
@@ -241,7 +258,6 @@ if (process.env.NODE_ENV === "development") {
         routes.push({
           path: middleware.route.path,
           methods,
-          // ✅ Add route categories for debugging
           category: middleware.route.path.includes("/kassir")
             ? "kassir"
             : middleware.route.path.includes("/orders")
@@ -253,7 +269,6 @@ if (process.env.NODE_ENV === "development") {
       }
     });
 
-    // ✅ Group routes by category
     const routesByCategory = routes.reduce((acc, route) => {
       const category = route.category;
       if (!acc[category]) acc[category] = [];
@@ -266,26 +281,44 @@ if (process.env.NODE_ENV === "development") {
       total_routes: routes.length,
       routes_by_category: routesByCategory,
       kassir_routes: routes.filter((r) => r.category === "kassir"),
+      new_kassir_features: [
+        "POST /orders/reopen/:orderId",
+        "GET /orders/completed-for-kassir",
+        "POST /kassir/reopen/:orderId",
+      ], // ✅ YANGI
       timestamp: new Date().toISOString(),
     });
   });
 
-  // ✅ Debug kassir workflow status
   router.get("/debug/kassir-status", authMiddleware, async (req, res) => {
     try {
-      const pendingCount = await require("../models/Order").countDocuments({
+      const Order = require("../models/Order");
+      const completedCount = await Order.countDocuments({
         status: "completed",
       });
-      const paidCount = await require("../models/Order").countDocuments({
+      const pendingPaymentCount = await Order.countDocuments({
+        status: "pending_payment",
+      }); // ✅ YANGI
+      const paidCount = await Order.countDocuments({ status: "paid" });
+      const mixedPaymentCount = await Order.countDocuments({
         status: "paid",
+        paymentMethod: "mixed",
       });
 
       res.json({
         success: true,
         kassir_workflow: {
-          pending_payments: pendingCount,
+          completed_orders: completedCount, // Kassir yopishi mumkin
+          pending_payment_orders: pendingPaymentCount, // ✅ Qayta ochildi
           paid_orders: paidCount,
-          total_processed: pendingCount + paidCount,
+          mixed_payment_orders: mixedPaymentCount,
+          total_actionable: completedCount + pendingPaymentCount, // ✅ Kassir ish qila oladigan zakazlar
+          total_processed: paidCount,
+        },
+        workflow_status: {
+          can_reopen: completedCount > 0, // ✅ Qayta ochish mumkinmi
+          can_process_payment: pendingPaymentCount > 0, // ✅ To'lov qabul qilish mumkinmi
+          total_revenue_pending: "calculated_separately", // Alohida hisoblash kerak
         },
         timestamp: new Date().toISOString(),
       });

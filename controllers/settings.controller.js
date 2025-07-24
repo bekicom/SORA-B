@@ -2,7 +2,7 @@ const Settings = require("../models/Settings");
 const fs = require("fs");
 const path = require("path");
 
-// ✅ Sozlamalarni olish (model bilan mos)
+// ✅ Sozlamalarni olish
 const getSettings = async (req, res) => {
   try {
     let settings = await Settings.findOne({ is_active: true }).populate(
@@ -10,7 +10,6 @@ const getSettings = async (req, res) => {
     );
 
     if (!settings) {
-      // ✅ Model'dagi default qiymatlar bilan yaratish
       settings = await Settings.create({
         restaurant_name: "SORA RESTAURANT",
         phone: "+998 90 123 45 67",
@@ -52,7 +51,6 @@ const createSettings = async (req, res) => {
   try {
     console.log("📝 Yangi settings yaratilmoqda:", req.body);
 
-    // Eski active settings'ni o'chirish
     await Settings.updateMany({}, { is_active: false });
 
     const newSettings = await Settings.create({
@@ -107,7 +105,7 @@ const updateSettings = async (req, res) => {
   }
 };
 
-// ✅ Logo yuklash (model field bilan mos)
+// ✅ Logo yuklash
 const uploadLogo = async (req, res) => {
   try {
     if (!req.file) {
@@ -124,7 +122,7 @@ const uploadLogo = async (req, res) => {
 
     const updated = await Settings.findOneAndUpdate(
       { is_active: true },
-      { logo: imageUrl }, // ✅ logoUrl emas, logo
+      { logo: imageUrl },
       { new: true, upsert: true }
     );
 
@@ -156,7 +154,6 @@ const deleteLogo = async (req, res) => {
       });
     }
 
-    // ✅ Fayl tizimidan o'chirish
     if (settings.logo) {
       const filePath = path.join(
         __dirname,
@@ -170,7 +167,6 @@ const deleteLogo = async (req, res) => {
       }
     }
 
-    // ✅ Ma'lumotlar bazasidan o'chirish
     settings.logo = null;
     await settings.save();
 
@@ -195,10 +191,8 @@ const resetToDefault = async (req, res) => {
   try {
     console.log("🔄 Default holatga qaytarilmoqda...");
 
-    // Barcha settings'ni inactive qilish
     await Settings.updateMany({}, { is_active: false });
 
-    // Yangi default settings yaratish
     const defaultSettings = await Settings.create({
       restaurant_name: "SORA RESTAURANT",
       phone: "+998 90 123 45 67",
@@ -236,7 +230,7 @@ const resetToDefault = async (req, res) => {
   }
 };
 
-// ✅ Test chek generatsiyasi (frontend template bilan)
+// ✅ Test chek generatsiyasi (mixed payment bilan)
 const generateTestReceipt = async (req, res) => {
   try {
     const settings = await Settings.findOne({ is_active: true });
@@ -248,30 +242,22 @@ const generateTestReceipt = async (req, res) => {
       });
     }
 
-    // ✅ Frontend template format'ida
     const testReceiptData = {
-      // Restaurant info
       restaurant_name: settings.restaurant_name,
       address: settings.address,
       phone: settings.phone,
       email: settings.email,
       website: settings.website,
       logo: settings.logo,
-
-      // Order info
       order_number: "#TEST001",
       table_number: "TEST",
       waiter_name: "Test User",
       date: new Date().toLocaleString("uz-UZ"),
-
-      // Items
       items: [
         { name: "Choy", quantity: 2, price: 5000, total: 10000 },
         { name: "Lag'mon", quantity: 1, price: 25000, total: 25000 },
         { name: "Non", quantity: 1, price: 2000, total: 2000 },
       ],
-
-      // Calculations
       subtotal: 37000,
       service_percent: settings.service_percent,
       service_amount: Math.round((37000 * settings.service_percent) / 100),
@@ -281,16 +267,25 @@ const generateTestReceipt = async (req, res) => {
         37000 +
         Math.round((37000 * settings.service_percent) / 100) +
         Math.round((37000 * settings.tax_percent) / 100),
-
-      // Settings
+      // ✅ Mixed payment ma'lumotlari qo'shildi
+      payment_method: "mixed",
+      payment_amount: 45140, // total_amount ga teng
+      mixed_payment_details: {
+        cash_amount: 25000,
+        card_amount: 20140,
+        total_amount: 45140,
+        change_amount: 0,
+        breakdown: {
+          cash_percentage: ((25000 / 45140) * 100).toFixed(1),
+          card_percentage: ((20140 / 45140) * 100).toFixed(1),
+        },
+      },
       currency: settings.currency,
       footer_text: settings.footer_text,
       font_size: settings.font_size,
       font_family: settings.font_family,
       text_color: settings.text_color,
       show_qr: settings.show_qr,
-
-      // Print settings
       kassir_printer_ip: settings.kassir_printer_ip,
       type: "test_receipt",
     };
@@ -311,7 +306,7 @@ const generateTestReceipt = async (req, res) => {
   }
 };
 
-// ✅ YANGI: HTML to Image Print Endpoint
+// ✅ HTML to Image Print Endpoint (mixed payment bilan)
 const printImageReceipt = async (req, res) => {
   try {
     const {
@@ -331,14 +326,28 @@ const printImageReceipt = async (req, res) => {
       imageDataLength: imageData ? imageData.length : 0,
     });
 
-    if (!imageData) {
+    // ✅ order_data uchun validatsiya
+    if (!imageData || !order_data) {
       return res.status(400).json({
         success: false,
-        message: "Image data topilmadi",
+        message: "Image data yoki order_data topilmadi",
       });
     }
 
-    const printerIP = printer_ip || "192.168.0.106";
+    if (
+      order_data.payment_method === "mixed" &&
+      !order_data.mixed_payment_details
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Mixed payment uchun mixed_payment_details talab qilinadi",
+      });
+    }
+
+    const printerIP =
+      printer_ip ||
+      (await Settings.findOne({ is_active: true }))?.kassir_printer_ip ||
+      "192.168.0.106";
 
     // 1. Base64 image'ni buffer'ga aylantirish
     const base64Data = imageData.replace(/^data:image\/png;base64,/, "");
@@ -380,12 +389,7 @@ const printImageReceipt = async (req, res) => {
           });
 
           // 4. Image'ni print qilish
-          printer
-            .align("CT") // Center align
-            .raster(image, "dw") // Double width agar kerak bo'lsa
-            .feed(2) // 2 ta bo'sh qator
-            .cut() // Paper cut
-            .close(); // Connection close
+          printer.align("CT").raster(image, "dw").feed(2).cut().close();
 
           console.log("✅ HTML to Image print muvaffaqiyatli yuborildi");
 
@@ -393,6 +397,11 @@ const printImageReceipt = async (req, res) => {
             success: true,
             message: "HTML to Image print muvaffaqiyatli yuborildi!",
             printer_ip: printerIP,
+            order_data: {
+              order_number: order_data.order_number,
+              payment_method: order_data.payment_method,
+              mixed_payment_details: order_data.mixed_payment_details,
+            },
             image_info: {
               width: image.width,
               height: image.height,
@@ -436,13 +445,44 @@ const testKassirPrinter = async (req, res) => {
       `🖨️ Kassir printer (${settings.kassir_printer_ip}) test qilinmoqda...`
     );
 
-    // Print server'ga yuborish (bu yerda haqiqiy print logic bo'lishi kerak)
-    // Bu yerga print server bilan integration qo'shiladi
+    const escpos = require("escpos");
+    escpos.Network = require("escpos-network");
 
-    res.status(200).json({
-      success: true,
-      message: `Kassir printer (${settings.kassir_printer_ip}) muvaffaqiyatli testdan o'tdi`,
-      printer_ip: settings.kassir_printer_ip,
+    const device = new escpos.Network(settings.kassir_printer_ip, 9100);
+    const printer = new escpos.Printer(device);
+
+    device.open((err) => {
+      if (err) {
+        console.error(
+          `❌ Printer'ga (${settings.kassir_printer_ip}) ulanib bo'lmadi:`,
+          err.message
+        );
+        return res.status(400).json({
+          success: false,
+          message: `Printer'ga (${settings.kassir_printer_ip}) ulanib bo'lmadi`,
+          error: err.message,
+        });
+      }
+
+      printer
+        .font("A")
+        .align("CT")
+        .style("B")
+        .size(1, 1)
+        .text("SORA RESTAURANT")
+        .text("Test Chek")
+        .feed(2)
+        .cut()
+        .close();
+
+      console.log(
+        `✅ Kassir printer (${settings.kassir_printer_ip}) testdan o'tdi`
+      );
+      res.status(200).json({
+        success: true,
+        message: `Kassir printer (${settings.kassir_printer_ip}) muvaffaqiyatli testdan o'tdi`,
+        printer_ip: settings.kassir_printer_ip,
+      });
     });
   } catch (error) {
     console.error("❌ Kassir printer testida xatolik:", error);
@@ -534,7 +574,7 @@ const getSettingsInfo = async (req, res) => {
   }
 };
 
-// ✅ EXPORT (printImageReceipt qo'shildi)
+// ✅ EXPORT
 module.exports = {
   getSettings,
   createSettings,
@@ -543,7 +583,7 @@ module.exports = {
   deleteLogo,
   resetToDefault,
   generateTestReceipt,
-  printImageReceipt, // ✅ YANGI endpoint
+  printImageReceipt,
   testKassirPrinter,
   getKassirPrinterStatus,
   getSettingsInfo,

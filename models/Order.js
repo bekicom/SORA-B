@@ -20,7 +20,6 @@ const orderItemSchema = new mongoose.Schema(
       type: Number,
       default: 1,
     },
-    // Qo'shimcha ma'lumotlar
     category_name: String,
     printer_id: mongoose.Schema.Types.ObjectId,
     printer_ip: String,
@@ -29,10 +28,9 @@ const orderItemSchema = new mongoose.Schema(
   { _id: false }
 );
 
-// So'ng order schema (✅ KASSIR WORKFLOW bilan yangilangan)
+// Order schema (Kassir workflow + Mixed payment bilan yangilangan)
 const orderSchema = new mongoose.Schema(
   {
-    // Daily order number system
     daily_order_number: {
       type: Number,
       index: true,
@@ -41,8 +39,6 @@ const orderSchema = new mongoose.Schema(
       type: String, // "2025-07-15" format
       index: true,
     },
-
-    // Basic order info
     table_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Table",
@@ -54,28 +50,23 @@ const orderSchema = new mongoose.Schema(
       required: true,
     },
     items: [orderItemSchema],
-
-    // ✅ UPDATED STATUS ENUM - Kassir workflow uchun
     status: {
       type: String,
       enum: [
-        "pending", // Yangi zakaz
-        "preparing", // Tayyorlanmoqda
-        "ready", // Tayyor
-        "served", // Xizmat ko'rsatildi
-        "completed", // ✅ Ofitsiant yopdi (kassir uchun)
-        "paid", // ✅ Kassir to'lov qabul qildi
-        "cancelled", // ✅ Bekor qilingan
+        "pending",
+        "preparing",
+        "ready",
+        "served",
+        "completed",
+        "paid",
+        "cancelled",
       ],
       default: "pending",
     },
-
     total_price: {
       type: Number,
       required: true,
     },
-
-    // Financial calculations
     service_amount: {
       type: Number,
       default: 0,
@@ -88,64 +79,81 @@ const orderSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
-
-    // ✅ KASSIR WORKFLOW FIELDS
     completedAt: {
       type: Date,
-      // Ofitsiant zakaz yopganda
     },
     completedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      // Qaysi ofitsiant yopgani
     },
-
     paidAt: {
       type: Date,
-      // Kassir to'lov qabul qilganda
     },
     paidBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      // Qaysi kassir to'lov qabul qilgani
     },
-
     paymentMethod: {
       type: String,
       enum: ["cash", "card", "transfer", "mixed"],
-      // To'lov usuli
     },
-
+    paymentAmount: {
+      type: Number,
+      default: 0,
+    },
+    changeAmount: {
+      type: Number,
+      default: 0,
+    },
+    mixedPaymentDetails: {
+      cashAmount: {
+        type: Number,
+        default: 0,
+      },
+      cardAmount: {
+        type: Number,
+        default: 0,
+      },
+      totalAmount: {
+        type: Number,
+        default: 0,
+      },
+      changeAmount: {
+        type: Number,
+        default: 0,
+      },
+      breakdown: {
+        cash_percentage: {
+          type: String,
+          default: "0.0",
+        },
+        card_percentage: {
+          type: String,
+          default: "0.0",
+        },
+      },
+      timestamp: {
+        type: Date,
+        default: Date.now,
+      },
+    },
     receiptPrinted: {
       type: Boolean,
       default: false,
-      // Chek chiqarilganmi
     },
-
     receiptPrintedAt: {
       type: Date,
-      // Chek qachon chiqarilgan
     },
-
     receiptPrintedBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
-      // Kim chek chiqargan
     },
-
-    // ✅ KASSIR NOTES
     kassirNotes: {
       type: String,
-      // Kassir izohlari
     },
-
-    // Backward compatibility
     closedAt: {
       type: Date,
-      // Eski field - completedAt bilan bir xil
     },
-
-    // Additional fields
     table_number: String,
     waiter_name: String,
     kitchen_print_template: {
@@ -162,9 +170,18 @@ const orderSchema = new mongoose.Schema(
 
 // Compound indexes
 orderSchema.index({ order_date: 1, daily_order_number: 1 }, { unique: true });
-orderSchema.index({ status: 1, completedAt: 1 }); // ✅ Kassir workflow uchun
-orderSchema.index({ status: 1, paidAt: 1 }); // ✅ To'lov holati uchun
-
+orderSchema.index({ status: 1, completedAt: 1 });
+orderSchema.index({ status: 1, paidAt: 1 });
+orderSchema.index({ paymentMethod: 1, paidAt: 1 });
+orderSchema.statics.getAllActiveOrders = async function () {
+  return await this.find({
+    status: { $in: ["pending", "preparing", "ready", "served"] }, // Faol zakazlar
+    paidAt: { $exists: false }, // To'lanmagan zakazlar
+  })
+    .populate("user_id", "first_name last_name")
+    .populate("table_id", "name number")
+    .sort({ createdAt: -1 });
+};
 // Pre-save middleware
 orderSchema.pre("save", async function (next) {
   // Daily order number generation
@@ -192,22 +209,76 @@ orderSchema.pre("save", async function (next) {
     }
   }
 
-  // ✅ Status change logic
+  // Status change logic
   if (this.isModified("status")) {
     const now = new Date();
 
-    // Ofitsiant zakaz yopganda
     if (this.status === "completed" && !this.completedAt) {
       this.completedAt = now;
-      this.closedAt = now; // Backward compatibility
+      this.closedAt = now;
       console.log(`📋 Order completed: ${this.formatted_order_number}`);
     }
 
-    // Kassir to'lov qabul qilganda
     if (this.status === "paid" && !this.paidAt) {
       this.paidAt = now;
       console.log(`💰 Payment received: ${this.formatted_order_number}`);
     }
+  }
+
+  // Mixed payment validation
+  if (this.paymentMethod === "mixed" && this.mixedPaymentDetails) {
+    const { cashAmount, cardAmount, totalAmount, changeAmount } =
+      this.mixedPaymentDetails;
+
+    // Validate amounts
+    if (cashAmount < 0 || cardAmount < 0) {
+      return next(
+        new Error("Naqd yoki karta summasi manfiy bo'lishi mumkin emas")
+      );
+    }
+
+    if (!totalAmount || totalAmount <= 0) {
+      return next(new Error("TotalAmount noto'g'ri"));
+    }
+
+    if (Math.abs(totalAmount - (cashAmount + cardAmount)) > 0.01) {
+      return next(
+        new Error(
+          `Naqd va karta summalari jami totalAmount ga teng bo'lishi kerak! Cash: ${cashAmount}, Card: ${cardAmount}, Total: ${totalAmount}`
+        )
+      );
+    }
+
+    if (totalAmount < this.final_total) {
+      return next(
+        new Error(
+          `To'lov summasi yetarli emas! Kerak: ${this.final_total}, Kiritildi: ${totalAmount}`
+        )
+      );
+    }
+
+    // Calculate percentages
+    if (totalAmount > 0) {
+      this.mixedPaymentDetails.breakdown.cash_percentage = (
+        (cashAmount / totalAmount) *
+        100
+      ).toFixed(1);
+      this.mixedPaymentDetails.breakdown.card_percentage = (
+        (cardAmount / totalAmount) *
+        100
+      ).toFixed(1);
+    }
+
+    // Update main payment fields
+    this.paymentAmount = totalAmount;
+    this.changeAmount = changeAmount || 0;
+
+    console.log(`🔄 Mixed payment processed: ${this.formatted_order_number}`, {
+      cash: cashAmount,
+      card: cardAmount,
+      total: totalAmount,
+      change: changeAmount,
+    });
   }
 
   next();
@@ -219,15 +290,12 @@ orderSchema.virtual("formatted_order_number").get(function () {
   return `#${String(this.daily_order_number).padStart(3, "0")}`;
 });
 
-// ✅ STATIC METHODS - Kassir workflow uchun
-
-// Today's orders count
+// STATIC METHODS
 orderSchema.statics.getTodayOrdersCount = async function () {
   const today = new Date().toISOString().split("T")[0];
   return await this.countDocuments({ order_date: today });
 };
 
-// Next order number
 orderSchema.statics.getNextOrderNumber = async function () {
   const today = new Date().toISOString().split("T")[0];
   const lastOrder = await this.findOne({ order_date: today })
@@ -237,7 +305,6 @@ orderSchema.statics.getNextOrderNumber = async function () {
   return lastOrder ? lastOrder.daily_order_number + 1 : 1;
 };
 
-// ✅ Get completed orders (kassir uchun)
 orderSchema.statics.getCompletedOrders = async function (options = {}) {
   const {
     startDate = new Date().toISOString().split("T")[0],
@@ -260,16 +327,67 @@ orderSchema.statics.getCompletedOrders = async function (options = {}) {
     .limit(limit);
 };
 
-// ✅ Get pending payments (kassir dashboard uchun)
 orderSchema.statics.getPendingPayments = async function () {
   return await this.find({ status: "completed" })
     .populate("user_id", "first_name last_name")
     .populate("table_id", "name number")
     .populate("completedBy", "first_name last_name")
-    .sort({ completedAt: 1 }); // Eng eskisi birinchi
+    .sort({ completedAt: 1 });
 };
 
-// ✅ Daily sales summary
+orderSchema.statics.getPaymentAnalytics = async function (date) {
+  const targetDate = date || new Date().toISOString().split("T")[0];
+
+  const result = await this.aggregate([
+    {
+      $match: {
+        order_date: targetDate,
+        status: "paid",
+      },
+    },
+    {
+      $group: {
+        _id: "$paymentMethod",
+        count: { $sum: 1 },
+        totalAmount: { $sum: "$paymentAmount" },
+        avgAmount: { $avg: "$paymentAmount" },
+      },
+    },
+  ]);
+
+  const mixedPayments = await this.find({
+    order_date: targetDate,
+    status: "paid",
+    paymentMethod: "mixed",
+  }).select("mixedPaymentDetails");
+
+  let totalCashFromMixed = 0;
+  let totalCardFromMixed = 0;
+
+  mixedPayments.forEach((order) => {
+    if (order.mixedPaymentDetails) {
+      totalCashFromMixed += order.mixedPaymentDetails.cashAmount || 0;
+      totalCardFromMixed += order.mixedPaymentDetails.cardAmount || 0;
+    }
+  });
+
+  return {
+    paymentMethods: result,
+    mixedPaymentBreakdown: {
+      totalMixedOrders: mixedPayments.length,
+      totalCashFromMixed,
+      totalCardFromMixed,
+      totalMixedAmount: totalCashFromMixed + totalCardFromMixed,
+      avgCashPerMixed: mixedPayments.length
+        ? totalCashFromMixed / mixedPayments.length
+        : 0,
+      avgCardPerMixed: mixedPayments.length
+        ? totalCardFromMixed / mixedPayments.length
+        : 0,
+    },
+  };
+};
+
 orderSchema.statics.getDailySalesSummary = async function (date) {
   const targetDate = date || new Date().toISOString().split("T")[0];
 
@@ -294,12 +412,40 @@ orderSchema.statics.getDailySalesSummary = async function (date) {
         totalServiceAmount: { $sum: "$service_amount" },
         totalTaxAmount: { $sum: "$tax_amount" },
         avgOrderValue: { $avg: "$final_total" },
+        cashOrders: {
+          $sum: { $cond: [{ $eq: ["$paymentMethod", "cash"] }, 1, 0] },
+        },
+        cardOrders: {
+          $sum: { $cond: [{ $eq: ["$paymentMethod", "card"] }, 1, 0] },
+        },
+        transferOrders: {
+          $sum: { $cond: [{ $eq: ["$paymentMethod", "transfer"] }, 1, 0] },
+        },
+        mixedOrders: {
+          $sum: { $cond: [{ $eq: ["$paymentMethod", "mixed"] }, 1, 0] },
+        },
       },
     },
   ]);
 
-  return (
-    result[0] || {
+  const mixedPayments = await this.find({
+    order_date: targetDate,
+    status: "paid",
+    paymentMethod: "mixed",
+  }).select("mixedPaymentDetails");
+
+  let totalCashFromMixed = 0;
+  let totalCardFromMixed = 0;
+
+  mixedPayments.forEach((order) => {
+    if (order.mixedPaymentDetails) {
+      totalCashFromMixed += order.mixedPaymentDetails.cashAmount || 0;
+      totalCardFromMixed += order.mixedPaymentDetails.cardAmount || 0;
+    }
+  });
+
+  return {
+    ...(result[0] || {
       totalOrders: 0,
       completedOrders: 0,
       paidOrders: 0,
@@ -307,13 +453,21 @@ orderSchema.statics.getDailySalesSummary = async function (date) {
       totalServiceAmount: 0,
       totalTaxAmount: 0,
       avgOrderValue: 0,
-    }
-  );
+      cashOrders: 0,
+      cardOrders: 0,
+      transferOrders: 0,
+      mixedOrders: 0,
+    }),
+    mixedPaymentBreakdown: {
+      totalMixedOrders: mixedPayments.length,
+      totalCashFromMixed,
+      totalCardFromMixed,
+      totalMixedAmount: totalCashFromMixed + totalCardFromMixed,
+    },
+  };
 };
 
-// ✅ INSTANCE METHODS
-
-// Get order display info
+// INSTANCE METHODS
 orderSchema.methods.getOrderDisplayInfo = function () {
   return {
     id: this._id,
@@ -328,34 +482,157 @@ orderSchema.methods.getOrderDisplayInfo = function () {
     completed: this.completedAt,
     paid: this.paidAt,
     paymentMethod: this.paymentMethod,
+    paymentAmount: this.paymentAmount,
+    changeAmount: this.changeAmount,
+    mixedPaymentDetails: this.mixedPaymentDetails,
     receiptPrinted: this.receiptPrinted,
   };
 };
 
-// ✅ Complete order (ofitsiant tomonidan)
 orderSchema.methods.completeOrder = async function (completedBy) {
   this.status = "completed";
   this.completedAt = new Date();
   this.completedBy = completedBy;
-  this.closedAt = this.completedAt; // Backward compatibility
+  this.closedAt = this.completedAt;
   return await this.save();
 };
 
-// ✅ Process payment (kassir tomonidan)
+// ✅ TUZATILGAN processPayment METODI
 orderSchema.methods.processPayment = async function (
   paidBy,
   paymentMethod,
-  notes
+  notes,
+  paymentData = {}
 ) {
+  console.log("🔍 processPayment called with:", {
+    paidBy,
+    paymentMethod,
+    notes,
+    paymentData,
+    orderFinalTotal: this.final_total,
+    orderNumber: this.formatted_order_number,
+  });
+
+  if (this.status !== "completed") {
+    throw new Error("Faqat yopilgan zakaz'lar uchun to'lov qabul qilinadi");
+  }
+
+  if (!["cash", "card", "transfer", "mixed"].includes(paymentMethod)) {
+    throw new Error("Noto'g'ri to'lov usuli");
+  }
+
   this.status = "paid";
   this.paidAt = new Date();
   this.paidBy = paidBy;
   this.paymentMethod = paymentMethod;
   if (notes) this.kassirNotes = notes;
+
+  if (paymentMethod === "mixed") {
+    if (!paymentData.mixedPayment) {
+      throw new Error("Mixed payment ma'lumotlari talab qilinadi");
+    }
+
+    const { cashAmount, cardAmount, totalAmount, changeAmount } =
+      paymentData.mixedPayment;
+
+    console.log("🔍 Mixed payment validation:", {
+      cashAmount,
+      cardAmount,
+      totalAmount,
+      changeAmount,
+      orderFinalTotal: this.final_total,
+    });
+
+    // Mixed payment validation
+    if (cashAmount < 0 || cardAmount < 0) {
+      throw new Error("Naqd yoki karta summasi manfiy bo'lishi mumkin emas");
+    }
+
+    if (!totalAmount || totalAmount <= 0) {
+      throw new Error("Mixed payment: TotalAmount noto'g'ri");
+    }
+
+    if (Math.abs(totalAmount - (cashAmount + cardAmount)) > 0.01) {
+      throw new Error(
+        `Naqd va karta summalari jami totalAmount ga teng bo'lishi kerak! Cash: ${cashAmount}, Card: ${cardAmount}, Total: ${totalAmount}`
+      );
+    }
+
+    if (totalAmount < this.final_total) {
+      throw new Error(
+        `Mixed payment: To'lov summasi yetarli emas! Kerak: ${this.final_total}, Kiritildi: ${totalAmount}`
+      );
+    }
+
+    this.mixedPaymentDetails = {
+      cashAmount,
+      cardAmount,
+      totalAmount,
+      changeAmount: changeAmount || 0,
+      timestamp: new Date(),
+    };
+    this.paymentAmount = totalAmount;
+    this.changeAmount = changeAmount || 0;
+
+    console.log("✅ Mixed payment processed:", {
+      cash: cashAmount,
+      card: cardAmount,
+      total: totalAmount,
+      change: changeAmount,
+    });
+  } else {
+    // ✅ ASOSIY TUZATISH SHU YERDA!
+    // Frontend'dan kelayotgan data ni to'g'ri olish
+    const amount = paymentData.paymentAmount || paymentData.amount || 0;
+    const change = paymentData.changeAmount || paymentData.change || 0;
+
+    console.log("🔍 Single payment validation:", {
+      paymentDataPaymentAmount: paymentData.paymentAmount,
+      paymentDataAmount: paymentData.amount,
+      finalAmount: amount,
+      changeAmount: change,
+      orderFinalTotal: this.final_total,
+      paymentMethod,
+    });
+
+    if (!amount || amount <= 0) {
+      throw new Error(`To'lov summasi noto'g'ri: ${amount}`);
+    }
+
+    // Cash uchun amount >= final_total bo'lishi kerak
+    // Card uchun exact amount bo'lishi mumkin
+    if (paymentMethod === "cash" && amount < this.final_total) {
+      throw new Error(
+        `To'lov summasi yetarli emas! Kerak: ${this.final_total}, Kiritildi: ${amount}`
+      );
+    }
+
+    // Card uchun exact amount bo'lishi kerak
+    if (
+      paymentMethod === "card" &&
+      Math.abs(amount - this.final_total) > 0.01
+    ) {
+      console.log("⚠️ Card payment amount mismatch, but allowing it...");
+      // Card uchun exact amount o'rnatish
+      this.paymentAmount = this.final_total;
+      this.changeAmount = 0;
+    } else {
+      this.paymentAmount = amount;
+      this.changeAmount = change;
+    }
+
+    this.mixedPaymentDetails = null; // Oddiy to'lovda mixedPaymentDetails tozalanadi
+
+    console.log("✅ Single payment processed:", {
+      method: paymentMethod,
+      amount: this.paymentAmount,
+      change: this.changeAmount,
+    });
+  }
+
   return await this.save();
 };
 
-// ✅ Mark receipt as printed
 orderSchema.methods.markReceiptPrinted = async function (printedBy) {
   this.receiptPrinted = true;
   this.receiptPrintedAt = new Date();
@@ -363,9 +640,8 @@ orderSchema.methods.markReceiptPrinted = async function (printedBy) {
   return await this.save();
 };
 
-// ✅ Get kassir summary
 orderSchema.methods.getKassirSummary = function () {
-  return {
+  const summary = {
     orderNumber: this.formatted_order_number,
     tableNumber: this.table_number,
     waiterName: this.waiter_name,
@@ -375,10 +651,41 @@ orderSchema.methods.getKassirSummary = function () {
     taxAmount: this.tax_amount,
     finalTotal: this.final_total,
     completedAt: this.completedAt,
+    paidAt: this.paidAt,
     status: this.status,
     receiptPrinted: this.receiptPrinted,
     paymentMethod: this.paymentMethod,
+    paymentAmount: this.paymentAmount,
+    changeAmount: this.changeAmount,
     kassirNotes: this.kassirNotes,
+  };
+
+  if (this.paymentMethod === "mixed" && this.mixedPaymentDetails) {
+    summary.mixedPaymentDetails = this.mixedPaymentDetails;
+  }
+
+  return summary;
+};
+
+orderSchema.methods.getPaymentSummary = function () {
+  if (this.paymentMethod === "mixed" && this.mixedPaymentDetails) {
+    return {
+      method: "mixed",
+      totalAmount: this.paymentAmount,
+      changeAmount: this.changeAmount,
+      breakdown: {
+        cash: this.mixedPaymentDetails.cashAmount,
+        card: this.mixedPaymentDetails.cardAmount,
+        cash_percentage: this.mixedPaymentDetails.breakdown.cash_percentage,
+        card_percentage: this.mixedPaymentDetails.breakdown.card_percentage,
+      },
+    };
+  }
+
+  return {
+    method: this.paymentMethod,
+    totalAmount: this.paymentAmount,
+    changeAmount: this.changeAmount,
   };
 };
 

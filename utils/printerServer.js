@@ -1,5 +1,6 @@
 const net = require("net");
 
+// ✅ PROFESSIONAL RESTORAN CHEKI generator
 function initPrinterServer(app) {
   // ✅ Oshxona printeri (ESC/POS - o'zgarishsiz)
   app.post("/print", async (req, res) => {
@@ -11,7 +12,6 @@ function initPrinterServer(app) {
       escpos.Network = require("escpos-network");
       const device = new escpos.Network(printerIp, 9100);
       const printer = new escpos.Printer(device);
-
       device.open(function (err) {
         if (err) {
           console.error("❌ Printerga ulanib bo'lmadi:", err.message);
@@ -19,7 +19,6 @@ function initPrinterServer(app) {
             .status(400)
             .json({ message: "❌ Printerga ulanishda xatolik" });
         }
-
         printer
           .encode("UTF-8")
           .align("CT")
@@ -46,6 +45,9 @@ function initPrinterServer(app) {
               .text(`   Miqdor: x ${qty} `)
               .text("-----------------");
           });
+
+          // ✅ Chekning oxirida bo‘sh qatorlar chiqib, balandroq bo‘lishi uchun
+          printer.feed(10); // 5 ta bo‘sh qator
         }
 
         printer.text("").align("CT").cut().close();
@@ -117,7 +119,6 @@ function initPrinterServer(app) {
   });
 }
 
-// ✅ Raw content generator (PROFESSIONAL 58mm format - 2-chi rasmdagi kabi)
 function generateRawReceiptContent(data) {
   const {
     restaurant_name = "SORA",
@@ -145,89 +146,103 @@ function generateRawReceiptContent(data) {
   const ESC = "\x1B";
   const ALIGN_CENTER = ESC + "a1";
   const ALIGN_LEFT = ESC + "a0";
-  const ALIGN_RIGHT = ESC + "a2";
   const BOLD_ON = ESC + "E1";
   const BOLD_OFF = ESC + "E0";
+  const SIZE_SMALL = ESC + "!1";
   const SIZE_NORMAL = ESC + "!0";
-  const SIZE_DOUBLE = ESC + "!1";
+  const SIZE_LARGE = ESC + "!16";
+
+  // ✅ MINIMAL LINE SPACING
+  const LINE_SPACING_TIGHT = ESC + "3" + String.fromCharCode(18);
+
   const CUT = ESC + "d3" + ESC + "i";
   const INIT = ESC + "@";
-
   let content = "";
 
-  // ✅ Initialize printer
+  // ✅ Initialize + tight spacing
   content += INIT;
+  content += LINE_SPACING_TIGHT;
 
-  // ✅ PROFESSIONAL Header (2-chi rasmdagi kabi)
-  content += ALIGN_CENTER + SIZE_DOUBLE + BOLD_ON;
+  // ✅ PROFESSIONAL Header
+  content += ALIGN_CENTER + SIZE_NORMAL + BOLD_ON;
   content += restaurant_name + "\n";
-  content += SIZE_NORMAL + BOLD_OFF;
+  content += SIZE_SMALL + BOLD_OFF;
   content += phone + "\n";
   content += address + "\n";
   if (website) content += website + "\n";
   content += "\n";
 
-  // ✅ Order info (2-chi rasmdagi kabi format)
-  content += ALIGN_LEFT;
+  // ✅ Separator line
+  content += ALIGN_CENTER + "================================\n";
+
+  // ✅ Order info (professional format)
+  content += ALIGN_LEFT + SIZE_SMALL;
+  content += "\n";
   content += `Zakaz: ${order_number}\n`;
   content += `Vaqt: ${date}\n`;
+  content += "\n";
   content += `Ofitsiant: ${waiter_name}\n`;
   content += `Stol: ${table_display}\n`;
-  content += `Gostey: ${guests}\n`;
   content += "\n";
-
-  // ✅ Items section (2-chi rasmdagi kabi professional table)
-  content += "Bludo    Kol    Summa\n";
-  content += "--------\n";
-
-  // ✅ Items list (2-chi rasmdagi kabi spacing)
-  items.forEach((item) => {
-    const name = (item.name || "Unknown").substring(0, 20).padEnd(20);
-    const qty = (item.quantity || 1).toString().padStart(3);
-    const price = formatPriceNormal(item.price || 0).padStart(8);
-    content += `${name} ${qty}  ${price}\n`;
-  });
 
   content += "\n";
 
-  // ✅ Totals section (2-chi rasmdagi kabi professional)
-  content += ALIGN_LEFT;
-  content += `Summa:                ${formatPriceNormal(subtotal)}.00\n`;
-  content += `Obsluzhivanie (${service_percent}%):     ${formatPriceNormal(
-    service_amount
-  )}.00\n`;
+  // ✅ Items header
+  content += "Nomi        Soni   Summa\n";
+  content += "--------------------------------\n";
 
-  content += "--------\n";
-  content +=
-    BOLD_ON +
-    `ITOGO:            ${formatPriceNormal(total_amount)}.00\n` +
-    BOLD_OFF;
-  content += "\n";
-
-  // ✅ QR code (2-chi rasmdagi kabi)
-  if (show_qr) {
-    content += ALIGN_CENTER;
-    content += "[QR KOD]\n";
-    content += "\n";
-  }
-
-  // ✅ Footer (2-chi rasmdagi kabi professional)
-  content += ALIGN_CENTER;
-  if (footer_text) {
-    const footerLines = footer_text.split("\n");
-    footerLines.forEach((line) => {
-      content += line + "\n";
+  // ✅ Items (professional alignment)
+  if (items && items.length > 0) {
+    items.forEach((item) => {
+      const name = (item.name || "Unknown").substring(0, 9).padEnd(9);
+      content += "\n";
+      const qty = `${item.quantity || 1}x`.padStart(4);
+      const price = formatPriceNormal(item.price * item.quantity || 0).padStart(
+        10
+      );
+      content += `${name} ${qty} ${price}\n`;
     });
   }
 
+  content += "\n";
+
+  // ✅ Separator
+  content += "--------------------------------\n";
+
+  // ✅ Totals (professional)
+  content += ALIGN_LEFT + SIZE_SMALL;
+  if (subtotal > 0) {
+    content += `Summa: ${formatPriceNormal(subtotal)}\n`;
+  }
+  content += "\n";
+  if (service_amount > 0) {
+    content += `Ofitsiant xizmati (${service_percent}%): ${formatPriceNormal(
+      service_amount
+    )}\n`;
+  }
+  if (tax_amount > 0) {
+    content += `Nalog (${tax_percent}%):             ${formatPriceNormal(
+      tax_amount
+    )}\n`;
+  }
+
+  // ✅ Final separator
+  content += "================================\n";
+
+  // ✅ TOTAL (bold and larger)
+  content += BOLD_ON + SIZE_NORMAL;
+  content += `JAMI:  ${formatPriceNormal(total_amount)}\n`;
+  content += BOLD_OFF + SIZE_SMALL;
+
+  // ✅ Professional footer
+  content += ALIGN_CENTER;
 
   // ✅ Cut paper
   content += CUT;
-
   return content;
 }
 
-// ✅ Professional price formatting (2-chi rasmdagi kabi)
+// ✅ Price formatting (o'zgarishsiz)
 function formatPriceNormal(price) {
   if (price >= 1000) {
     return (
