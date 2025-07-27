@@ -497,7 +497,8 @@ orderSchema.methods.completeOrder = async function (completedBy) {
   return await this.save();
 };
 
-// ✅ TUZATILGAN processPayment METODI
+// ✅ Faqat shu metodini almashtiring (424-525 qator atrofida):
+
 orderSchema.methods.processPayment = async function (
   paidBy,
   paymentMethod,
@@ -511,10 +512,11 @@ orderSchema.methods.processPayment = async function (
     paymentData,
     orderFinalTotal: this.final_total,
     orderNumber: this.formatted_order_number,
+    paymentDataKeys: Object.keys(paymentData), // ✅ Qanday keylar borligini ko'rish
   });
 
-  if (this.status !== "completed") {
-    throw new Error("Faqat yopilgan zakaz'lar uchun to'lov qabul qilinadi");
+  if (!["completed", "pending_payment"].includes(this.status)) {
+    throw new Error("Faqat yopilgan yoki qayta ochildi zakaz'lar uchun to'lov qabul qilinadi");
   }
 
   if (!["cash", "card", "transfer", "mixed"].includes(paymentMethod)) {
@@ -565,74 +567,122 @@ orderSchema.methods.processPayment = async function (
     }
 
     this.mixedPaymentDetails = {
-      cashAmount,
-      cardAmount,
-      totalAmount,
-      changeAmount: changeAmount || 0,
+      cashAmount: Number(cashAmount),
+      cardAmount: Number(cardAmount),
+      totalAmount: Number(totalAmount),
+      changeAmount: Number(changeAmount) || 0,
       timestamp: new Date(),
+      breakdown: {
+        cash_percentage: ((Number(cashAmount) / Number(totalAmount)) * 100).toFixed(1),
+        card_percentage: ((Number(cardAmount) / Number(totalAmount)) * 100).toFixed(1),
+      }
     };
-    this.paymentAmount = totalAmount;
-    this.changeAmount = changeAmount || 0;
+    this.paymentAmount = Number(totalAmount);
+    this.changeAmount = Number(changeAmount) || 0;
 
     console.log("✅ Mixed payment processed:", {
-      cash: cashAmount,
-      card: cardAmount,
-      total: totalAmount,
-      change: changeAmount,
+      cash: this.mixedPaymentDetails.cashAmount,
+      card: this.mixedPaymentDetails.cardAmount,
+      total: this.paymentAmount,
+      change: this.changeAmount,
     });
   } else {
     // ✅ ASOSIY TUZATISH SHU YERDA!
-    // Frontend'dan kelayotgan data ni to'g'ri olish
-    const amount = paymentData.paymentAmount || paymentData.amount || 0;
-    const change = paymentData.changeAmount || paymentData.change || 0;
+    // paymentData obyektidan to'g'ri olish
+    let amount = 0;
+    let change = 0;
 
-    console.log("🔍 Single payment validation:", {
-      paymentDataPaymentAmount: paymentData.paymentAmount,
-      paymentDataAmount: paymentData.amount,
-      finalAmount: amount,
-      changeAmount: change,
+    // Controller'dan kelayotgan ma'lumotlarni to'g'ri olish
+    if (paymentData.paymentAmount !== undefined && paymentData.paymentAmount !== null) {
+      amount = Number(paymentData.paymentAmount);
+    } else if (paymentData.amount !== undefined && paymentData.amount !== null) {
+      amount = Number(paymentData.amount);
+    } else {
+      // Agar paymentData ichida yo'q bo'lsa, to'g'ridan-to'g'ri paymentData o'zi bo'lishi mumkin
+      amount = Number(paymentData) || 0;
+    }
+
+    if (paymentData.changeAmount !== undefined && paymentData.changeAmount !== null) {
+      change = Number(paymentData.changeAmount);
+    } else if (paymentData.change !== undefined && paymentData.change !== null) {
+      change = Number(paymentData.change);
+    }
+
+    console.log("🔍 Single payment processing:", {
+      originalPaymentData: paymentData,
+      extractedAmount: amount,
+      extractedChange: change,
       orderFinalTotal: this.final_total,
       paymentMethod,
+      amountType: typeof amount,
+      isAmountNumber: !isNaN(amount),
     });
 
-    if (!amount || amount <= 0) {
-      throw new Error(`To'lov summasi noto'g'ri: ${amount}`);
+    // ✅ Validation
+    if (isNaN(amount) || amount <= 0) {
+      console.error("❌ Invalid payment amount:", {
+        amount,
+        isNaN: isNaN(amount),
+        paymentData,
+        paymentMethod
+      });
+      throw new Error(`To'lov summasi noto'g'ri: ${amount} (${typeof amount})`);
     }
 
     // Cash uchun amount >= final_total bo'lishi kerak
-    // Card uchun exact amount bo'lishi mumkin
     if (paymentMethod === "cash" && amount < this.final_total) {
       throw new Error(
-        `To'lov summasi yetarli emas! Kerak: ${this.final_total}, Kiritildi: ${amount}`
+        `Naqd to'lov summasi yetarli emas! Kerak: ${this.final_total}, Kiritildi: ${amount}`
       );
     }
 
-    // Card uchun exact amount bo'lishi kerak
-    if (
-      paymentMethod === "card" &&
-      Math.abs(amount - this.final_total) > 0.01
-    ) {
-      console.log("⚠️ Card payment amount mismatch, but allowing it...");
-      // Card uchun exact amount o'rnatish
+    // Card/Transfer uchun exact amount bo'lishi kerak
+    if (["card", "transfer"].includes(paymentMethod)) {
+      // Card to'lovda exact amount o'rnatish
       this.paymentAmount = this.final_total;
       this.changeAmount = 0;
+      
+      console.log(`✅ ${paymentMethod} payment: exact amount set to ${this.final_total}`);
     } else {
+      // Cash to'lovda
       this.paymentAmount = amount;
-      this.changeAmount = change;
+      this.changeAmount = isNaN(change) ? 0 : change;
+      
+      console.log(`✅ Cash payment: amount=${amount}, change=${this.changeAmount}`);
     }
 
     this.mixedPaymentDetails = null; // Oddiy to'lovda mixedPaymentDetails tozalanadi
 
-    console.log("✅ Single payment processed:", {
+    console.log("✅ Single payment final values:", {
       method: paymentMethod,
-      amount: this.paymentAmount,
-      change: this.changeAmount,
+      paymentAmount: this.paymentAmount,
+      changeAmount: this.changeAmount,
+      finalTotal: this.final_total,
     });
   }
 
+  // ✅ Final validation before save
+  if (!this.paymentAmount || this.paymentAmount <= 0) {
+    console.error("❌ Final validation failed:", {
+      paymentAmount: this.paymentAmount,
+      paymentMethod,
+      paymentData,
+      finalTotal: this.final_total
+    });
+    throw new Error(`Final validation: To'lov summasi noto'g'ri - ${this.paymentAmount}`);
+  }
+
+  console.log("💾 Saving order with payment data:", {
+    orderNumber: this.formatted_order_number,
+    status: this.status,
+    paymentMethod: this.paymentMethod,
+    paymentAmount: this.paymentAmount,
+    changeAmount: this.changeAmount,
+    finalTotal: this.final_total,
+  });
+
   return await this.save();
 };
-
 orderSchema.methods.markReceiptPrinted = async function (printedBy) {
   this.receiptPrinted = true;
   this.receiptPrintedAt = new Date();

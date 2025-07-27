@@ -26,6 +26,11 @@ const foodSchema = new mongoose.Schema(
     warehouse: {
       type: String,
     },
+    unit: {
+      type: String,
+      enum: ["dona", "kg", "litr", "metr", "gramm", "sm", "bek"],
+      required: [true, "Birlik tanlanishi shart"],
+    },
   },
   {
     timestamps: true,

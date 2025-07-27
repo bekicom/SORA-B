@@ -4,9 +4,9 @@ const Department = require("../models/department.model");
 // ➕ Taom yaratish
 const createFood = async (req, res) => {
   try {
-    const { name, price, category, department_id } = req.body;
+    const { name, price, category, department_id, unit } = req.body;
 
-    if (!name || !price || !category || !department_id) {
+    if (!name || !price || !category || !department_id || !unit) {
       return res
         .status(400)
         .json({ message: "Barcha maydonlar to‘ldirilishi kerak" });
@@ -23,6 +23,7 @@ const createFood = async (req, res) => {
       category,
       department_id,
       warehouse: department.warehouse,
+      unit,
     });
 
     res.status(201).json({
@@ -39,7 +40,7 @@ const getAllFoods = async (req, res) => {
   try {
     const foods = await Food.find()
       .populate("department_id", "title warehouse")
-      .populate("category", "title") // ← Kategoriya nomini ham olib keladi
+      .populate("category", "title")
       .sort({ createdAt: -1 });
 
     res.status(200).json({ foods });
@@ -51,9 +52,9 @@ const getAllFoods = async (req, res) => {
 // 🔄 Taomni yangilash
 const updateFood = async (req, res) => {
   try {
-    const { name, price, category, department_id } = req.body;
+    const { name, price, category, department_id, unit } = req.body;
 
-    if (!name || !price || !category || !department_id) {
+    if (!name || !price || !category || !department_id || !unit) {
       return res
         .status(400)
         .json({ message: "Barcha maydonlar to‘ldirilishi kerak" });
@@ -72,6 +73,7 @@ const updateFood = async (req, res) => {
         category,
         department_id,
         warehouse: department.warehouse,
+        unit,
       },
       { new: true, runValidators: true }
     );
