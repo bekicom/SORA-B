@@ -4,12 +4,27 @@ const Department = require("../models/department.model");
 // ➕ Taom yaratish
 const createFood = async (req, res) => {
   try {
-    const { name, price, category, department_id, unit } = req.body;
+    const {
+      name,
+      price,
+      category,
+      department_id,
+      unit,
+      quantity,
+      expiration_date,
+    } = req.body;
 
-    if (!name || !price || !category || !department_id || !unit) {
+    if (
+      !name ||
+      price === undefined ||
+      !category ||
+      !department_id ||
+      !unit ||
+      expiration_date === undefined
+    ) {
       return res
         .status(400)
-        .json({ message: "Barcha maydonlar to‘ldirilishi kerak" });
+        .json({ message: "Barcha majburiy maydonlar to‘ldirilishi kerak" });
     }
 
     const department = await Department.findById(department_id);
@@ -24,6 +39,8 @@ const createFood = async (req, res) => {
       department_id,
       warehouse: department.warehouse,
       unit,
+      quantity: quantity || 0,
+      expiration_date,
     });
 
     res.status(201).json({
@@ -52,12 +69,27 @@ const getAllFoods = async (req, res) => {
 // 🔄 Taomni yangilash
 const updateFood = async (req, res) => {
   try {
-    const { name, price, category, department_id, unit } = req.body;
+    const {
+      name,
+      price,
+      category,
+      department_id,
+      unit,
+      quantity,
+      expiration_date,
+    } = req.body;
 
-    if (!name || !price || !category || !department_id || !unit) {
+    if (
+      !name ||
+      price === undefined ||
+      !category ||
+      !department_id ||
+      !unit ||
+      expiration_date === undefined
+    ) {
       return res
         .status(400)
-        .json({ message: "Barcha maydonlar to‘ldirilishi kerak" });
+        .json({ message: "Barcha majburiy maydonlar to‘ldirilishi kerak" });
     }
 
     const department = await Department.findById(department_id);
@@ -74,6 +106,8 @@ const updateFood = async (req, res) => {
         department_id,
         warehouse: department.warehouse,
         unit,
+        quantity: quantity || 0,
+        expiration_date,
       },
       { new: true, runValidators: true }
     );

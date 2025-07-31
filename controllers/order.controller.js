@@ -4,7 +4,7 @@ const Category = require("../models/Category");
 const User = require("../models/User");
 const Settings = require("../models/Settings");
 const Printer = require("../models/Printer");
-const Table = require("../models/Table"); // ✅ Table model import qo'shildi
+const Table = require("../models/Table");
 const axios = require("axios");
 
 // ✅ STOL STATUSINI YANGILASH FUNKSIYASI
@@ -108,11 +108,23 @@ const printReceiptToKassir = async (receiptData) => {
   }
 };
 
-// ✅ ZAKASNI YOPISH - STOL STATUSINI BO'SH QILISH BILAN
+
+
+
+
+
+
 const closeOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const userId = req.user?.id;
+
+    const userId = req.user?.id || req.user?._id || req.user || null;
+    console.log("🔍 User info:", {
+      req_user: req.user,
+      userId: userId,
+      headers: req.headers.authorization,
+    });
+
     const order = await Order.findById(orderId)
       .populate("user_id")
       .populate("table_id")
@@ -125,6 +137,15 @@ const closeOrder = async (req, res) => {
       });
     }
 
+    console.log("📋 Order debug:", {
+      order_id: order._id,
+      user_id: order.user_id,
+      status: order.status,
+      existing_service_amount: order.service_amount,
+      existing_waiter_percentage: order.waiter_percentage,
+      existing_final_total: order.final_total,
+    });
+
     if (["completed", "paid", "cancelled"].includes(order.status)) {
       return res.status(400).json({
         success: false,
@@ -136,7 +157,21 @@ const closeOrder = async (req, res) => {
       "kassir_printer_id"
     );
 
-    const waiter = order.user_id;
+    // ✅ Authorization check
+    if (
+      userId &&
+      order.user_id &&
+      String(order.user_id._id || order.user_id) !== String(userId) &&
+      req.user?.role !== "kassir"
+    ) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "Faqat buyurtmani ochgan afitsant yoki kassir zakazni yopishi mumkin",
+      });
+    }
+
+    const waiter = order.user_id || null;
     const table = order.table_id;
 
     console.log("📋 Order ma'lumotlari:", {
@@ -145,35 +180,104 @@ const closeOrder = async (req, res) => {
       formatted_number: order.formatted_order_number,
       current_status: order.status,
       table_name: table?.name,
-      table_id: table?._id,
-      waiter_name: waiter?.first_name,
-      waiter_percent: waiter?.percent || 0,
+      waiter_name: waiter?.first_name || "Noma'lum",
       items_count: order.items?.length,
     });
 
-    // 💰 Financial calculations
+    // ✅ TUZATILDI: Order yaratishda hisoblangan ma'lumotlarni ishlatish
     const subtotal = order.total_price;
-    const servicePercent = settings?.service_percent || 10;
-    const taxPercent = settings?.tax_percent || 12;
-    const waiterPercent = waiter?.percent || 0;
-    const waiterAmount = Math.round((subtotal * waiterPercent) / 100);
-    const serviceAmount = Math.round((subtotal * servicePercent) / 100);
-    const taxAmount = 0;
-    const totalAmount = subtotal + serviceAmount + taxAmount + waiterAmount;
+    let serviceAmount = 0;
+    let waiterPercent = 0;
+    let waiterAmount = 0;
+    let taxAmount = 0;
+    let totalAmount = 0;
 
-    // ✅ Orderga ma'lumotlarni saqlash
+    // ✅ Agar order yaratishda allaqachon hisoblangan bo'lsa, ularni ishlatish
+    if (order.service_amount !== undefined && order.service_amount !== null) {
+      serviceAmount = order.service_amount;
+      console.log("✅ Mavjud service_amount ishlatildi:", serviceAmount);
+    } else {
+      // Faqat mavjud bo'lmasa qayta hisoblash
+      const servicePercent = settings?.service_percent || 10;
+      serviceAmount = Math.round((subtotal * servicePercent) / 100);
+      console.log("⚠️ Service_amount qayta hisoblandi:", serviceAmount);
+    }
+
+    if (
+      order.waiter_percentage !== undefined &&
+      order.waiter_percentage !== null
+    ) {
+      waiterPercent = order.waiter_percentage;
+      console.log("✅ Mavjud waiter_percentage ishlatildi:", waiterPercent);
+    } else {
+      // Faqat mavjud bo'lmasa qayta hisoblash
+      waiterPercent = waiter ? Number(waiter.percent) || 0 : 0;
+      console.log("⚠️ Waiter_percentage qayta hisoblandi:", waiterPercent);
+    }
+
+    // ✅ MUHIM: Waiter amount - bu order yaratishda allaqachon service_amount ga kiritilgan!
+    // Alohida waiter_amount yo'q, chunki u service_amount ning bir qismi
+    waiterAmount = Math.round((subtotal * waiterPercent) / 100);
+
+    if (order.tax_amount !== undefined && order.tax_amount !== null) {
+      taxAmount = order.tax_amount;
+    } else {
+      taxAmount = 0; // Hozircha soliq yo'q
+    }
+
+    if (order.final_total !== undefined && order.final_total !== null) {
+      totalAmount = order.final_total;
+      console.log("✅ Mavjud final_total ishlatildi:", totalAmount);
+    } else {
+      // ✅ TUZATILDI: To'g'ri hisoblash
+      // Service amount allaqachon waiter percentage ni o'z ichiga oladi
+      totalAmount = subtotal + serviceAmount + taxAmount;
+      console.log("⚠️ Final_total qayta hisoblandi:", totalAmount);
+    }
+
+    console.log("💰 Financial breakdown:", {
+      subtotal,
+      serviceAmount: `${serviceAmount} (${waiterPercent}% afitsant foizi bilan)`,
+      waiterPercent,
+      waiterAmount: `${waiterAmount} (bu service_amount ning bir qismi)`,
+      taxAmount,
+      totalAmount,
+      note: "Waiter amount service amount ga allaqachon kiritilgan",
+    });
+
+    // ✅ Order statusini yangilash
     order.status = "completed";
     order.completedAt = new Date();
-    order.completedBy = userId;
+    order.completedBy = userId || waiter?._id || "system";
     order.closedAt = order.completedAt;
-    order.service_amount = serviceAmount;
-    order.tax_amount = taxAmount;
-    order.waiter_percent = waiterPercent;
-    order.waiter_amount = waiterAmount;
-    order.final_total = totalAmount;
+
+    // ✅ Faqat mavjud bo'lmagan qiymatlarni saqlash
+    if (order.service_amount === undefined || order.service_amount === null) {
+      order.service_amount = serviceAmount;
+    }
+    if (order.tax_amount === undefined || order.tax_amount === null) {
+      order.tax_amount = taxAmount;
+    }
+    if (
+      order.waiter_percentage === undefined ||
+      order.waiter_percentage === null
+    ) {
+      order.waiter_percentage = waiterPercent;
+    }
+    if (order.final_total === undefined || order.final_total === null) {
+      order.final_total = totalAmount;
+    }
+
     await order.save();
 
-    // ✅ STOL STATUSINI BO'SH QILISH
+    console.log("💾 Order saved with values:", {
+      waiter_percentage: order.waiter_percentage,
+      service_amount: order.service_amount,
+      final_total: order.final_total,
+      completedBy: order.completedBy,
+    });
+
+    // ✅ Stol statusini bo'sh qilish
     if (order.table_id) {
       const tableUpdateResult = await updateTableStatus(
         order.table_id,
@@ -182,13 +286,14 @@ const closeOrder = async (req, res) => {
       console.log("📋 Stol statusi yangilash natijasi:", tableUpdateResult);
     }
 
+    // ✅ Table info
     const tableDisplayInfo = table
       ? {
           id: table._id,
           name: table.name,
           number: table.number || table.name,
           display_name: table.display_name || table.name,
-          status: "bo'sh", // ✅ Yangi status
+          status: "bo'sh",
         }
       : {
           id: order.table_id,
@@ -198,6 +303,7 @@ const closeOrder = async (req, res) => {
           status: "bo'sh",
         };
 
+    // ✅ TUZATILDI: To'g'ri response structure
     const response = {
       success: true,
       message: "Zakaz yopildi, kassir bo'limiga yuborildi va stol bo'shatildi",
@@ -208,24 +314,24 @@ const closeOrder = async (req, res) => {
         formatted_order_number: order.formatted_order_number,
         status: order.status,
         completed_at: order.completedAt,
-        completed_by: waiter?.first_name,
-        service_amount: serviceAmount,
-        tax_amount: taxAmount,
-        waiter_amount: waiterAmount,
-        final_total: totalAmount,
+        completed_by: waiter?.first_name || "System",
+        service_amount: order.service_amount,
+        tax_amount: order.tax_amount,
+        waiter_percentage: order.waiter_percentage,
+        final_total: order.final_total,
         order_date: order.order_date,
       },
 
       table: tableDisplayInfo,
 
       waiter: {
-        id: waiter?._id,
-        name: waiter?.first_name,
-        percent: waiterPercent,
+        id: waiter?._id || null,
+        name: waiter?.first_name || "Noma'lum",
+        percent: order.waiter_percentage || 0,
         earned_amount: waiterAmount,
         note:
-          waiterPercent > 0
-            ? `Afitsant ${waiterPercent}% oladi`
+          order.waiter_percentage > 0
+            ? `Afitsant ${order.waiter_percentage}% oladi (service_amount ga kiritilgan)`
             : "Afitsant foizi belgilanmagan",
       },
 
@@ -237,7 +343,6 @@ const closeOrder = async (req, res) => {
         auto_print_disabled: true,
       },
 
-      // ✅ STOL STATUSI MA'LUMOTI
       table_status: {
         updated: true,
         previous_status: "band",
@@ -247,29 +352,49 @@ const closeOrder = async (req, res) => {
 
       totals: {
         subtotal,
-        service: `${servicePercent}% = ${serviceAmount}`,
-        tax: `${taxPercent}% = ${taxAmount}`,
-        waiter: `${waiterPercent}% = ${waiterAmount}`,
-        total: totalAmount,
+        service: `${order.waiter_percentage || 0}% = ${order.service_amount}`,
+        tax: `0% = ${order.tax_amount}`,
+        waiter_info: `Afitsant foizi service_amount ga kiritilgan`,
+        total: order.final_total,
         currency: settings?.currency || "UZS",
         breakdown: {
           food_cost: subtotal,
-          service_fee: serviceAmount,
-          tax_fee: taxAmount,
-          waiter_fee: waiterAmount,
-          grand_total: totalAmount,
+          service_fee: order.service_amount,
+          tax_fee: order.tax_amount,
+          waiter_note: "Afitsant foizi service_fee ga kiritilgan",
+          grand_total: order.final_total,
         },
       },
 
+      // ✅ Consistency check
+      consistency_check: {
+        create_time_totals: {
+          service_amount: order.service_amount,
+          waiter_percentage: order.waiter_percentage,
+          final_total: order.final_total,
+        },
+        close_time_totals: {
+          service_amount: serviceAmount,
+          waiter_percentage: waiterPercent,
+          final_total: totalAmount,
+        },
+        is_consistent:
+          order.service_amount === serviceAmount &&
+          order.final_total === totalAmount &&
+          order.waiter_percentage === waiterPercent,
+        note: "Create va close vaqtidagi hisob-kitoblar bir xil bo'lishi kerak",
+      },
+
       debug: {
-        workflow: "kassir_enabled_with_waiter_percent",
+        workflow: "using_existing_order_calculations",
         auto_print: false,
         table_status_updated: true,
-        waiter_calculation: {
-          base_amount: subtotal,
-          waiter_percent: waiterPercent,
-          waiter_bonus: waiterAmount,
-          total_with_waiter: totalAmount,
+        calculation_source: "from_order_creation_time",
+        user_info: {
+          userId: userId,
+          req_user_exists: !!req.user,
+          waiter_exists: !!waiter,
+          waiter_id: waiter?._id || null,
         },
         timestamp: new Date().toISOString(),
       },
@@ -284,142 +409,381 @@ const closeOrder = async (req, res) => {
       error: err.message,
       debug: {
         orderId: req.params.orderId,
+        user_info: {
+          req_user: req.user,
+          headers_auth: req.headers.authorization,
+        },
         timestamp: new Date().toISOString(),
       },
     });
   }
 };
 
+
+
+
 // ✅ YANGI ZAKAZ YARATISH - STOL STATUSINI BAND QILISH BILAN
 const createOrder = async (req, res) => {
+  const session = await Food.startSession();
+  session.startTransaction();
+
   try {
-    const { table_id, user_id, items, total_price } = req.body;
+    const { table_id, user_id, items, total_price, first_name } = req.body;
     console.log("📝 Yangi zakaz ma'lumotlari:", req.body);
 
+    // ✅ Input validation yaxshilandi
+    if (!user_id) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: "Afitsant ID kerak" });
+    }
+
+    if (!table_id) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: "Stol ID kerak" });
+    }
+
     if (!items || !Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
       return res.status(400).json({ message: "Kamida bitta taom kerak" });
     }
 
-    const updatedItems = [];
+    if (!total_price || total_price <= 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: "To'g'ri narx kiriting" });
+    }
 
+    // 1. Afitsantni topish va mavjudligini tekshirish
+    const waiter = await User.findById(user_id).lean();
+    if (!waiter) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: "Afitsant topilmadi" });
+    }
+
+    if (!waiter.is_active) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: "Afitsant faol emas" });
+    }
+
+    console.log("🔍 Topilgan afitsant:", waiter);
+
+    // ✅ Foiz hisoblashni yaxshilash
+    const waiterPercentage = waiter?.percent ? Number(waiter.percent) : 0;
+
+    // ✅ Foiz chegarasini tekshirish
+    if (waiterPercentage < 0 || waiterPercentage > 100) {
+      await session.abortTransaction();
+      return res.status(400).json({
+        message: `Noto'g'ri foiz qiymati: ${waiterPercentage}%`,
+      });
+    }
+
+    console.log("🔍 Afitsant foizi:", waiterPercentage);
+
+    // 2. Xizmat haqi hisoblash (2 kasr bilan)
+    const serviceAmount =
+      Math.round(total_price * (waiterPercentage / 100) * 100) / 100;
+    console.log("💰 Xizmat haqi:", serviceAmount);
+
+    // 3. Soliq (agar kerak bo'lsa)
+    const taxAmount = 0;
+
+    // 4. Yakuniy summa hisoblash
+    const finalTotal =
+      Math.round((total_price + serviceAmount + taxAmount) * 100) / 100;
+    console.log("📊 Yakuniy summa:", finalTotal);
+
+    // ✅ Stolni oldindan tekshirish
+    const table = await Table.findById(table_id).session(session);
+    if (!table) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: "Stol topilmadi" });
+    }
+
+    // ✅ Stol band bo'lsa ogohlantirish
+    if (table.status === "band") {
+      console.log("⚠️ Ogohlantirish: Stol allaqachon band");
+      // Band stolga ham buyurtma berish mumkin, lekin ogohlantiramiz
+    }
+
+    const tableNumber = table?.number || table?.name || req.body.table_number;
+
+    const updatedItems = [];
+    let calculatedTotal = 0; // ✅ Haqiqiy summani tekshirish uchun
+
+    // ✅ Items'ni parallel emas, ketma-ket qayta ishlash (transaction xavfsizligi uchun)
     for (const item of items) {
       const { food_id, quantity } = item;
 
       if (!food_id || !quantity) {
-        return res.status(400).json({ message: "food_id va quantity kerak" });
-      }
-
-      const food = await Food.findById(food_id).populate("category");
-      if (!food) {
-        return res.status(404).json({ message: `Taom topilmadi: ${food_id}` });
-      }
-
-      const category = food.category;
-      if (!category || !category.printer_id) {
+        await session.abortTransaction();
         return res.status(400).json({
-          message: `Kategoriya/printer topilmadi: ${food.name}`,
+          message: "Har bir taom uchun food_id va quantity kerak",
         });
       }
 
-      const printer = await Printer.findById(category.printer_id);
-      if (!printer) {
-        return res.status(404).json({
-          message: `Printer topilmadi: ${category.printer_id}`,
+      if (quantity <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: "Miqdor 0 dan katta bo'lishi kerak",
         });
       }
+
+      const food = await Food.findById(food_id)
+        .populate("category")
+        .session(session);
+
+      if (!food) {
+        await session.abortTransaction();
+        return res.status(404).json({
+          message: `Taom topilmadi: ${food_id}`,
+        });
+      }
+
+      // ✅ Taom faol emasligini tekshirish
+      if (food.is_active === false) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Taom faol emas: ${food.name}`,
+        });
+      }
+
+      // ✅ Muddati o'tgan taomni tekshirish
+      if (food.expiration_date && new Date(food.expiration_date) < new Date()) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Mahsulot muddati o'tgan: ${food.name} (${new Date(
+            food.expiration_date
+          ).toLocaleDateString("uz-UZ")})`,
+        });
+      }
+
+      // ✅ Ombordagi miqdorni tekshirish
+      if (food.quantity < quantity) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Omborda yetarli miqdor yo'q: ${food.name} (mavjud: ${food.quantity}, so'ralgan: ${quantity})`,
+        });
+      }
+
+      // ✅ Narxni tekshirish
+      if (!food.price || food.price <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Taom narxi noto'g'ri: ${food.name}`,
+        });
+      }
+
+      // Miqdorni kamaytirish
+      food.quantity -= quantity;
+      await food.save({ session });
+
+      // ✅ Kategoriya va printer tekshirish
+      const category = food.category;
+      if (!category) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Kategoriya topilmadi: ${food.name}`,
+        });
+      }
+
+      if (!category.printer_id) {
+        console.log(
+          `⚠️ Ogohlantirish: ${food.name} uchun printer belgilanmagan`
+        );
+      }
+
+      let printer = null;
+      if (category.printer_id) {
+        printer = await Printer.findById(category.printer_id).session(session);
+        if (!printer) {
+          console.log(
+            `⚠️ Ogohlantirish: Printer topilmadi: ${category.printer_id}`
+          );
+        }
+      }
+
+      // ✅ Haqiqiy summani hisoblash
+      const itemTotal = food.price * quantity;
+      calculatedTotal += itemTotal;
 
       updatedItems.push({
         food_id,
         name: food.name,
         price: food.price,
         quantity,
+        total: itemTotal, // ✅ Har bir item uchun total
         category_name: category.title,
-        printer_id: category.printer_id,
-        printer_ip: printer.ip,
-        printer_name: printer.name,
+        printer_id: category.printer_id || null,
+        printer_ip: printer?.ip || null,
+        printer_name: printer?.name || null,
       });
     }
 
-    const table = await Table.findById(table_id);
-    const tableNumber = table?.number || table?.name || req.body.table_number;
-
-    // ✅ ZAKAZ YARATISH
-    const newOrder = await Order.create({
-      table_id,
-      user_id,
-      items: updatedItems,
-      table_number: tableNumber,
-      total_price,
-      status: "pending",
-      waiter_name: req.body.first_name,
-    });
-
-    console.log("✅ Zakaz saqlandi:", newOrder.formatted_order_number);
-
-    // ✅ STOL STATUSINI BAND QILISH
-    if (table_id) {
-      const tableUpdateResult = await updateTableStatus(table_id, "band");
-      console.log("📋 Stol band qilish natijasi:", tableUpdateResult);
+    // ✅ Hisoblangan summa bilan yuborilgan summani solishtirish
+    if (Math.abs(calculatedTotal - total_price) > 0.01) {
+      console.log(
+        `⚠️ Summa farqi: Hisoblangan: ${calculatedTotal}, Yuborilgan: ${total_price}`
+      );
+      // Bu yerda xatolikni qaytarish yoki hisoblangan summani ishlatish mumkin
     }
 
-    // Print logic
+    // 5. Order yaratish
+    const newOrderArr = await Order.create(
+      [
+        {
+          table_id,
+          user_id,
+          items: updatedItems,
+          table_number: tableNumber,
+          total_price: calculatedTotal, // ✅ Hisoblangan summani ishlatish
+          status: "pending",
+          waiter_name: first_name || `${waiter.first_name} ${waiter.last_name}`,
+          waiter_percentage: waiterPercentage,
+          service_amount: serviceAmount,
+          tax_amount: taxAmount,
+          final_total: finalTotal,
+          created_at: new Date(),
+          // ✅ Qo'shimcha maydonlar
+          order_type: "dine_in", // restoran ichida
+          payment_status: "unpaid",
+          notes: req.body.notes || null,
+        },
+      ],
+      { session }
+    );
+    const newOrder = newOrderArr[0];
+
+    // ✅ Stol statusini yangilash (xatolikni handle qilish)
+    try {
+      await updateTableStatus(table_id, "band");
+      console.log(`✅ Stol ${tableNumber} band qilindi`);
+    } catch (tableError) {
+      console.error("❌ Stol statusini yangilashda xatolik:", tableError);
+      // Bu yerda transaction'ni abort qilmaslik, chunki order yaratildi
+    }
+
+    await session.commitTransaction();
+    console.log("✅ Transaction muvaffaqiyatli yakunlandi");
+
+    // 🖨️ Printerga yuborish (transaction'dan tashqarida)
     const printerGroups = {};
+    let totalPrintableItems = 0;
 
     for (const item of updatedItems) {
       if (!item.printer_ip) {
-        console.warn(`⚠️ Printer IP yo'q: ${item.name}`);
+        console.log(`⚠️ ${item.name} uchun printer IP yo'q`);
         continue;
       }
 
-      const printerKey = item.printer_ip;
-
-      if (!printerGroups[printerKey]) {
-        printerGroups[printerKey] = {
+      if (!printerGroups[item.printer_ip]) {
+        printerGroups[item.printer_ip] = {
           printer_ip: item.printer_ip,
           printer_name: item.printer_name,
           items: [],
         };
       }
 
-      printerGroups[printerKey].items.push({
+      printerGroups[item.printer_ip].items.push({
         name: item.name,
         quantity: item.quantity,
         price: item.price,
+        total: item.total,
         category: item.category_name,
         food_id: item.food_id,
       });
+      totalPrintableItems++;
     }
 
     const printResults = [];
 
-    for (const [printerIp, group] of Object.entries(printerGroups)) {
-      const payload = {
-        items: group.items,
-        table_number: tableNumber,
-        waiter_name: req.body.first_name || "Nomalum",
-        date: new Date().toLocaleString("uz-UZ"),
-        type: "new_order",
-        order_id: newOrder._id.toString(),
-        order_number: newOrder.formatted_order_number,
-        printerIp: printerIp,
-      };
+    // ✅ Parallel printing (tezroq)
+    const printPromises = Object.entries(printerGroups).map(
+      async ([printerIp, group]) => {
+        const payload = {
+          items: group.items,
+          table_number: tableNumber,
+          waiter_name: first_name || `${waiter.first_name} ${waiter.last_name}`,
+          date: new Date().toLocaleString("uz-UZ"),
+          time: new Date().toLocaleTimeString("uz-UZ"),
+          type: "new_order",
+          order_id: newOrder._id.toString(),
+          order_number:
+            newOrder.formatted_order_number ||
+            `#${newOrder._id.toString().slice(-6)}`,
+          total_amount: calculatedTotal,
+          service_amount: serviceAmount,
+          final_total: finalTotal,
+          printerIp,
+        };
 
-      const printResult = await printToPrinter(printerIp, payload);
-      printResults.push({
-        printer_ip: printerIp,
-        printer_name: group.printer_name,
-        items_count: group.items.length,
-        success: printResult.success,
-        error: printResult.error || null,
-      });
+        try {
+          const printResult = await printToPrinter(printerIp, payload);
+          return {
+            printer_ip: printerIp,
+            printer_name: group.printer_name,
+            items_count: group.items.length,
+            success: printResult.success,
+            error: printResult.error || null,
+          };
+        } catch (printError) {
+          console.error(
+            `❌ Printer ${printerIp} ga yuborishda xatolik:`,
+            printError
+          );
+          return {
+            printer_ip: printerIp,
+            printer_name: group.printer_name,
+            items_count: group.items.length,
+            success: false,
+            error: printError.message,
+          };
+        }
+      }
+    );
+
+    if (printPromises.length > 0) {
+      try {
+        const results = await Promise.allSettled(printPromises);
+        results.forEach((result, index) => {
+          if (result.status === "fulfilled") {
+            printResults.push(result.value);
+          } else {
+            console.error(`Print promise ${index} failed:`, result.reason);
+            printResults.push({
+              success: false,
+              error: result.reason?.message || "Unknown print error",
+            });
+          }
+        });
+      } catch (printError) {
+        console.error("❌ Printing process error:", printError);
+      }
     }
 
-    res.status(201).json({
-      message: "Zakaz muvaffaqiyatli yaratildi va stol band qilindi",
-      order: newOrder,
-      print_results: printResults,
-      total_printers: Object.keys(printerGroups).length,
-      // ✅ STOL STATUSI MA'LUMOTI
+    // ✅ Success response yaxshilandi
+    const response = {
+      success: true,
+      message: "Zakaz muvaffaqiyatli yaratildi",
+      order: {
+        id: newOrder._id,
+        order_number:
+          newOrder.formatted_order_number ||
+          `#${newOrder._id.toString().slice(-6)}`,
+        table_number: tableNumber,
+        waiter_name: first_name || `${waiter.first_name} ${waiter.last_name}`,
+        items_count: updatedItems.length,
+        total_price: calculatedTotal,
+        service_amount: serviceAmount,
+        final_total: finalTotal,
+        status: newOrder.status,
+        created_at: newOrder.created_at,
+      },
+      printing: {
+        total_printers: Object.keys(printerGroups).length,
+        printable_items: totalPrintableItems,
+        results: printResults,
+        all_printed: printResults.every((r) => r.success),
+      },
       table_status: {
         updated: true,
         previous_status: table?.status || "bo'sh",
@@ -427,30 +791,58 @@ const createOrder = async (req, res) => {
         table_name: tableNumber,
         message: "Stol avtomatik ravishda band qilindi",
       },
-      debug: {
-        total_items: updatedItems.length,
-        printer_groups: Object.keys(printerGroups),
-        order_number: newOrder.formatted_order_number,
-        table_status_updated: true,
-        timestamp: new Date().toISOString(),
-      },
+    };
+
+    console.log("🎉 Order yaratish yakunlandi:", {
+      order_id: newOrder._id,
+      total_items: updatedItems.length,
+      total_amount: calculatedTotal,
+      service_amount: serviceAmount,
+      final_total: finalTotal,
     });
+
+    res.status(201).json(response);
   } catch (error) {
+    await session.abortTransaction();
     console.error("❌ Zakaz yaratishda xatolik:", error);
-    res.status(500).json({
-      message: "Server xatosi",
+
+    // ✅ Error response yaxshilandi
+    const errorResponse = {
+      success: false,
+      message: "Zakaz yaratishda xatolik yuz berdi",
       error: error.message,
-      stack: process.env.NODE_ENV === "development" ? error.stack : undefined,
-    });
+      error_code: error.code || "UNKNOWN_ERROR",
+      timestamp: new Date().toISOString(),
+    };
+
+    // Development mode'da stack trace qo'shish
+    if (process.env.NODE_ENV === "development") {
+      errorResponse.stack = error.stack;
+      errorResponse.details = error;
+    }
+
+    res.status(500).json(errorResponse);
+  } finally {
+    await session.endSession();
+    console.log("🔚 Database session yakunlandi");
   }
 };
 
-// ✅ TO'LOV QABUL QILISH - STOL STATUSINI BO'SH QILISH BILAN
+
+
+
+
+
+
+
+
+
+
+
 const processPayment = async (req, res) => {
   try {
     const { orderId } = req.params;
-    const { paymentMethod, paymentAmount, changeAmount, mixedPayment, notes } =
-      req.body;
+    const { paymentMethod, paymentAmount, changeAmount, mixedPayment, notes } = req.body;
     const userId = req.user?.id;
 
     console.log("💰 To'lov qabul qilish:", {
@@ -478,53 +870,67 @@ const processPayment = async (req, res) => {
     if (!["completed", "pending_payment"].includes(order.status)) {
       return res.status(400).json({
         success: false,
-        message:
-          "Faqat yopilgan yoki qayta ochildi zakaz'lar uchun to'lov qabul qilish mumkin",
+        message: "Faqat yopilgan yoki qayta ochildi zakaz'lar uchun to'lov qabul qilish mumkin",
         current_status: order.status,
       });
     }
 
-    const validPaymentMethods = ["cash", "card", "transfer", "mixed"];
+    // ✅ YANGILANGAN TO'LOV USULLARI (click qo'shildi)
+    const validPaymentMethods = ["cash", "card", "click", "transfer", "mixed"];
     if (!validPaymentMethods.includes(paymentMethod)) {
       return res.status(400).json({
         success: false,
         message: "Noto'g'ri to'lov usuli",
         valid_methods: validPaymentMethods,
+        available_methods: {
+          cash: "Naqd to'lov",
+          card: "Bank kartasi",
+          click: "Click to'lov",
+          transfer: "Bank o'tkazmasi",
+          mixed: "Aralash to'lov (naqd + karta)"
+        }
       });
     }
 
-    // Payment validation logic...
+    // ✅ ARALASH TO'LOV VALIDATSIYASI
     if (paymentMethod === "mixed") {
-      if (
-        !mixedPayment ||
-        !mixedPayment.cashAmount ||
-        !mixedPayment.cardAmount ||
-        !mixedPayment.totalAmount
-      ) {
+      if (!mixedPayment) {
         return res.status(400).json({
           success: false,
-          message:
-            "Mixed payment uchun cashAmount, cardAmount va totalAmount kerak",
-          debug: { mixedPayment },
+          message: "Aralash to'lov uchun mixedPayment ma'lumotlari kerak",
         });
       }
 
-      const { cashAmount, cardAmount, totalAmount } = mixedPayment;
+      const { cashAmount = 0, cardAmount = 0, totalAmount } = mixedPayment;
 
       if (Number(cashAmount) < 0 || Number(cardAmount) < 0) {
         return res.status(400).json({
           success: false,
-          message: "To'lov summasi manfiy bo'lishi mumkin emas",
+          message: "To'lov summalari manfiy bo'lishi mumkin emas",
+          debug: { cashAmount, cardAmount }
         });
       }
 
-      if (Number(totalAmount) < order.final_total) {
+      if (Number(cashAmount) === 0 || Number(cardAmount) === 0) {
         return res.status(400).json({
           success: false,
-          message: `To'lov summasi yetarli emas! Kerak: ${order.final_total}, Kiritildi: ${totalAmount}`,
+          message: "Aralash to'lov uchun naqd va karta ikkalasi ham bo'lishi kerak",
+          provided: { cash: cashAmount, card: cardAmount }
         });
       }
+
+      const calculatedTotal = Number(cashAmount) + Number(cardAmount);
+      
+      if (calculatedTotal < order.final_total) {
+        return res.status(400).json({
+          success: false,
+          message: `To'lov summasi yetarli emas! Kerak: ${order.final_total}, Kiritildi: ${calculatedTotal}`,
+          shortage: order.final_total - calculatedTotal,
+        });
+      }
+
     } else {
+      // ✅ ODDIY TO'LOV VALIDATSIYASI
       if (!paymentAmount || Number(paymentAmount) <= 0) {
         return res.status(400).json({
           success: false,
@@ -532,57 +938,59 @@ const processPayment = async (req, res) => {
         });
       }
 
-      if (
-        paymentMethod === "cash" &&
-        Number(paymentAmount) < order.final_total
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: `Naqd to'lov summasi yetarli emas! Kerak: ${order.final_total}, Kiritildi: ${paymentAmount}`,
-        });
+      if (paymentMethod === "cash") {
+        if (Number(paymentAmount) < order.final_total) {
+          return res.status(400).json({
+            success: false,
+            message: `Naqd to'lov summasi yetarli emas! Kerak: ${order.final_total}, Kiritildi: ${paymentAmount}`,
+          });
+        }
+      } else {
+        // ✅ Karta, Click va Transfer uchun aniq summa
+        if (Math.abs(Number(paymentAmount) - order.final_total) > 1) {
+          return res.status(400).json({
+            success: false,
+            message: `${
+              paymentMethod === 'card' ? 'Karta' : 
+              paymentMethod === 'click' ? 'Click' : 
+              paymentMethod === 'transfer' ? 'Transfer' : paymentMethod
+            } to'lov aniq summa bo'lishi kerak`,
+            required: order.final_total,
+            provided: paymentAmount,
+            method: paymentMethod
+          });
+        }
       }
     }
 
+    // ✅ TO'LOV MA'LUMOTLARINI TAYYORLASH
     const paymentData = {};
 
     if (paymentMethod === "mixed") {
+      const { cashAmount = 0, cardAmount = 0 } = mixedPayment;
+      const calculatedTotal = Number(cashAmount) + Number(cardAmount);
+      
       paymentData.mixedPayment = {
-        cashAmount: Number(mixedPayment.cashAmount),
-        cardAmount: Number(mixedPayment.cardAmount),
-        totalAmount: Number(mixedPayment.totalAmount),
+        cashAmount: Number(cashAmount),
+        cardAmount: Number(cardAmount),
+        totalAmount: calculatedTotal,
         changeAmount: Number(changeAmount) || 0,
       };
-      paymentData.paymentAmount = Number(mixedPayment.totalAmount);
+      paymentData.paymentAmount = calculatedTotal;
       paymentData.changeAmount = Number(changeAmount) || 0;
     } else {
       paymentData.paymentAmount = Number(paymentAmount);
       paymentData.changeAmount = Number(changeAmount) || 0;
     }
 
-    // ✅ TO'LOV QAYD QILISH
+    // ✅ TO'LOVNI QAYD QILISH
     await order.processPayment(userId, paymentMethod, notes, paymentData);
 
-    // ✅ STOL STATUSINI BO'SH QILISH (TO'LOV TUGAGANDAN KEYIN)
+    // ✅ STOL STATUSINI BO'SH QILISH
     if (order.table_id) {
-      const tableUpdateResult = await updateTableStatus(
-        order.table_id,
-        "bo'sh"
-      );
-      console.log(
-        "📋 To'lov tugagach stol bo'shatish natijasi:",
-        tableUpdateResult
-      );
+      const tableUpdateResult = await updateTableStatus(order.table_id, "bo'sh");
+      console.log("📋 To'lov tugagach stol bo'shatish natijasi:", tableUpdateResult);
     }
-
-    console.log("✅ To'lov muvaffaqiyatli qayd qilindi va stol bo'shatildi:", {
-      order_number: order.formatted_order_number,
-      payment_method: paymentMethod,
-      total: order.final_total,
-      payment_amount: paymentData.paymentAmount,
-      change_amount: paymentData.changeAmount,
-      kassir: userId,
-      table_freed: true,
-    });
 
     const response = {
       success: true,
@@ -619,10 +1027,9 @@ const processPayment = async (req, res) => {
       table: {
         number: order.table_id?.number || order.table_number,
         name: order.table_id?.name,
-        status: "bo'sh", // ✅ Yangi status
+        status: "bo'sh",
       },
 
-      // ✅ STOL STATUSI MA'LUMOTI
       table_status: {
         updated: true,
         previous_status: "band",
@@ -630,20 +1037,18 @@ const processPayment = async (req, res) => {
         message: "To'lov tugagach stol avtomatik bo'shatildi",
       },
 
-      mixed_payment_details:
-        paymentMethod === "mixed"
-          ? {
-              cash_amount: order.mixedPaymentDetails?.cashAmount || 0,
-              card_amount: order.mixedPaymentDetails?.cardAmount || 0,
-              total_amount: order.mixedPaymentDetails?.totalAmount || 0,
-              change_amount: order.mixedPaymentDetails?.changeAmount || 0,
-            }
-          : null,
+      mixed_payment_details: paymentMethod === "mixed" ? {
+        cash_amount: order.mixedPaymentDetails?.cashAmount || 0,
+        card_amount: order.mixedPaymentDetails?.cardAmount || 0,
+        total_amount: order.mixedPaymentDetails?.totalAmount || 0,
+        change_amount: order.mixedPaymentDetails?.changeAmount || 0,
+      } : null,
 
       timestamp: new Date().toISOString(),
     };
 
     res.status(200).json(response);
+
   } catch (err) {
     console.error("❌ To'lov qabul qilishda xatolik:", err);
     res.status(500).json({
@@ -660,7 +1065,41 @@ const processPayment = async (req, res) => {
   }
 };
 
-// ✅ KASSIR UCHUN CHEK CHIQARISH (unchanged)
+
+
+// ✅ YORDAMCHI FUNKSIYALAR
+const getPaymentMethodDisplay = (method) => {
+  const methods = {
+    cash: "Naqd to'lov",
+    card: "Bank kartasi",
+    click: "Click to'lov",
+    transfer: "Bank o'tkazmasi",
+    mixed: "Aralash to'lov",
+  };
+  return methods[method] || method;
+};
+
+const getMixedPaymentSummary = (mixedDetails) => {
+  if (!mixedDetails) return null;
+
+  const { cashAmount = 0, cardAmount = 0, totalAmount = 0 } = mixedDetails;
+  const summary = [];
+
+  if (cashAmount > 0) {
+    summary.push(`Naqd: ${cashAmount.toLocaleString()} so'm`);
+  }
+  if (cardAmount > 0) {
+    summary.push(`Karta: ${cardAmount.toLocaleString()} so'm`);
+  }
+
+  return {
+    text: summary.join(" + "),
+    total: `Jami: ${totalAmount.toLocaleString()} so'm`,
+    parts: summary,
+  };
+};
+
+// ✅ KASSIR UCHUN CHEK CHIQARISH
 const printReceiptForKassir = async (req, res) => {
   try {
     const { orderId } = req.params;
@@ -792,14 +1231,13 @@ const printReceiptForKassir = async (req, res) => {
   }
 };
 
-// 🆕 YAXSHILANGAN getCompletedOrders funksiyasi - kalendar filter bilan
+// ✅ COMPLETED ORDERS
 const getCompletedOrders = async (req, res) => {
   try {
     const { date, startDate, endDate, paid, current_user_only } = req.query;
-
     const userId = req.user?.id;
 
-    console.log("📋 Completed orders request (CALENDAR FILTER):", {
+    console.log("📋 Completed orders request:", {
       date,
       startDate,
       endDate,
@@ -814,16 +1252,13 @@ const getCompletedOrders = async (req, res) => {
     if (date) {
       queryStartDate = date;
       queryEndDate = date;
-      console.log("📅 Single date filter:", { date });
     } else if (startDate && endDate) {
       queryStartDate = startDate;
       queryEndDate = endDate;
-      console.log("📅 Date range filter:", { startDate, endDate });
     } else {
       const today = new Date().toISOString().split("T")[0];
       queryStartDate = today;
       queryEndDate = today;
-      console.log("📅 Default today filter:", { today });
     }
 
     let query = {
@@ -835,7 +1270,6 @@ const getCompletedOrders = async (req, res) => {
 
     if (current_user_only === "true" && userId) {
       query.user_id = userId;
-      console.log("🔒 Faqat current user'ning zakaz'lari:", userId);
     }
 
     if (paid !== undefined) {
@@ -844,8 +1278,6 @@ const getCompletedOrders = async (req, res) => {
       query.status = { $in: ["completed", "paid"] };
     }
 
-    console.log("🔍 Final MongoDB query:", JSON.stringify(query, null, 2));
-
     const orders = await Order.find(query)
       .populate("user_id", "first_name last_name")
       .populate("table_id", "name number")
@@ -853,25 +1285,6 @@ const getCompletedOrders = async (req, res) => {
       .populate("paidBy", "first_name last_name")
       .sort({ completedAt: -1 })
       .limit(200);
-
-    console.log("🔍 Raw orders from database:", {
-      count: orders.length,
-      date_range: `${queryStartDate} to ${queryEndDate}`,
-      paid_param: paid,
-      current_user_only: current_user_only,
-      user_id: userId,
-      first_order: orders[0]
-        ? {
-            id: orders[0]._id,
-            status: orders[0].status,
-            order_date: orders[0].order_date,
-            formatted_number: orders[0].formatted_order_number,
-            table_number: orders[0].table_number,
-            final_total: orders[0].final_total,
-            completedAt: orders[0].completedAt,
-          }
-        : null,
-    });
 
     const totalAmount = orders.reduce((sum, order) => {
       return sum + (order.final_total || order.total_price || 0);
@@ -930,39 +1343,16 @@ const getCompletedOrders = async (req, res) => {
         total_card: orders
           .filter((o) => o.paymentMethod === "card")
           .reduce((sum, o) => sum + (o.final_total || 0), 0),
+        total_click: orders
+          .filter((o) => o.paymentMethod === "click")
+          .reduce((sum, o) => sum + (o.final_total || 0), 0),
         total_mixed: orders
           .filter((o) => o.paymentMethod === "mixed")
           .reduce((sum, o) => sum + (o.final_total || 0), 0),
       },
 
-      user_info:
-        current_user_only === "true"
-          ? {
-              id: userId,
-              name: orders[0]?.waiter_name || "Afitsant",
-              period_orders: orders.length,
-              period_revenue: totalAmount,
-              period_range:
-                queryStartDate === queryEndDate
-                  ? `${queryStartDate}`
-                  : `${queryStartDate} - ${queryEndDate}`,
-            }
-          : null,
-
       timestamp: new Date().toISOString(),
     };
-
-    console.log("✅ Processed response (CALENDAR FILTER):", {
-      orders_count: response.orders.length,
-      date_range: response.filter.date_range,
-      total_amount: response.total_amount,
-      filter_status: response.filter.status,
-      current_user_only: response.filter.current_user_only,
-      payment_methods: Object.keys(response.payment_stats.by_method),
-      completed_count: response.orders.filter((o) => o.status === "completed")
-        .length,
-      paid_count: response.orders.filter((o) => o.status === "paid").length,
-    });
 
     res.status(200).json(response);
   } catch (err) {
@@ -971,15 +1361,11 @@ const getCompletedOrders = async (req, res) => {
       success: false,
       message: "Completed orders olishda xatolik",
       error: err.message,
-      debug: {
-        query_params: req.query,
-        timestamp: new Date().toISOString(),
-      },
     });
   }
 };
 
-// ✅ PENDING PAYMENTS
+
 const getPendingPayments = async (req, res) => {
   try {
     console.log("📊 Kassir dashboard - pending payments");
@@ -1051,7 +1437,7 @@ const getDailySalesSummary = async (req, res) => {
   }
 };
 
-// ✅ Qolgan funksiyalar o'zgarishsiz...
+// ✅ QOLGAN FUNKSIYALAR
 const getOrdersByTable = async (req, res) => {
   try {
     const { tableId } = req.params;
@@ -1095,7 +1481,6 @@ const deleteOrder = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    // ✅ Zakaz o'chirilishidan oldin stol statusini bo'sh qilish
     const order = await Order.findById(orderId);
     if (order && order.table_id) {
       await updateTableStatus(order.table_id, "bo'sh");
@@ -1127,22 +1512,41 @@ const getBusyTables = async (req, res) => {
 const getMyPendingOrders = async (req, res) => {
   try {
     const userId = req.user.id;
+    const userRole = req.user.role;
 
-    const pendingOrders = await Order.find({
-      user_id: userId,
-      status: "pending",
-    })
-      .populate("table_id")
+    let query = {};
+
+    if (userRole === "kassir") {
+      query = {
+        status: { $in: ["pending", "preparing", "ready", "served"] },
+      };
+    } else {
+      query = {
+        user_id: userId,
+        status: "pending",
+      };
+    }
+
+    const orders = await Order.find(query)
+      .populate("table_id", "name number")
+      .populate("user_id", "first_name last_name")
       .sort({ createdAt: -1 });
 
-    res.status(200).json(pendingOrders);
+    res.status(200).json({
+      success: true,
+      orders: orders,
+      total_count: orders.length,
+      user_role: userRole,
+    });
   } catch (error) {
-    console.error("Pending orders error:", error);
-    res.status(500).json({ message: "Serverda xatolik yuz berdi" });
+    console.error("Orders error:", error);
+    res.status(500).json({
+      success: false,
+      message: "Serverda xatolik yuz berdi",
+    });
   }
 };
 
-// ✅ Legacy printReceipt (backward compatibility)
 const printReceipt = async (req, res) => {
   return await printReceiptForKassir(req, res);
 };
@@ -1161,5 +1565,5 @@ module.exports = {
   getCompletedOrders,
   getPendingPayments,
   getDailySalesSummary,
-  updateTableStatus, // ✅ Export qo'shildi
+  updateTableStatus,
 };

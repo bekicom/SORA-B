@@ -1,4 +1,4 @@
-const mongoose = require("mongoose"); // ✅ MUHIM
+const mongoose = require("mongoose");
 
 const foodSchema = new mongoose.Schema(
   {
@@ -14,7 +14,7 @@ const foodSchema = new mongoose.Schema(
     },
     category: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Category", // ✅ ref qo‘shildi
+      ref: "Category",
       required: [true, "Kategoriya majburiy"],
       trim: true,
     },
@@ -30,6 +30,19 @@ const foodSchema = new mongoose.Schema(
       type: String,
       enum: ["dona", "kg", "litr", "metr", "gramm", "sm", "bek"],
       required: [true, "Birlik tanlanishi shart"],
+    },
+
+    // ✅ Mahsulot soni (sklad uchun)
+    quantity: {
+      type: Number,
+      default: 0,
+      min: [0, "Mahsulot soni manfiy bo‘lishi mumkin emas"],
+    },
+
+    // ✅ Yaroqlilik muddati (srok)
+    expiration_date: {
+      type: Date,
+      required: [true, "Yaroqlilik muddati (srok) kiritilishi kerak"],
     },
   },
   {

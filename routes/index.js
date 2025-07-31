@@ -189,7 +189,7 @@ router.post(
   setting.createSettings
 );
 router.put(
-  "/settings/update",
+  "/settings/update", 
   authMiddleware,
   onlyAdmin,
   setting.updateSettings

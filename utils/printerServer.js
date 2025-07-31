@@ -46,8 +46,8 @@ function initPrinterServer(app) {
               .text("-----------------");
           });
 
-          // ✅ Chekning oxirida bo‘sh qatorlar chiqib, balandroq bo‘lishi uchun
-          printer.feed(10); // 5 ta bo‘sh qator
+          // ✅ Chekning oxirida bo'sh qatorlar chiqib, balandroq bo'lishi uchun
+          printer.feed(10); // 10 ta bo'sh qator
         }
 
         printer.text("").align("CT").cut().close();
@@ -59,10 +59,14 @@ function initPrinterServer(app) {
     }
   });
 
-  // ✅ KASSIR CHEKI: Raw Socket (frontend format)
+  // ✅ KASSIR CHEKI: Raw Socket (frontend format) - TUZATILDI
   app.post("/print-check", async (req, res) => {
     try {
       const receiptData = req.body;
+
+      // ✅ TUZATILDI: service_percent ni receiptData'dan olish
+      // ❌ ESKI: service_percent: order.waiter_percentage || 5, (order undefined edi!)
+      // ✅ YANGI: service_percent'ni receiptData'dan olish yoki default 10%
 
       console.log("🧾 Raw Socket kassir cheki:", {
         restaurant_name: receiptData.restaurant_name,
@@ -70,6 +74,10 @@ function initPrinterServer(app) {
           receiptData.order_number || receiptData.formatted_order_number,
         kassir_printer_ip: receiptData.kassir_printer_ip,
         total_amount: receiptData.total_amount,
+        // ✅ Debug ma'lumotlari
+        service_percent: receiptData.service_percent,
+        service_amount: receiptData.service_amount,
+        subtotal: receiptData.subtotal,
       });
 
       const printerIP = receiptData.kassir_printer_ip || "192.168.0.106";
@@ -94,6 +102,13 @@ function initPrinterServer(app) {
           printer_ip: printerIP,
           order_number:
             receiptData.order_number || receiptData.formatted_order_number,
+          // ✅ Debug response
+          debug: {
+            service_percent: receiptData.service_percent,
+            service_amount: receiptData.service_amount,
+            subtotal: receiptData.subtotal,
+            total_amount: receiptData.total_amount,
+          },
         });
       });
 
@@ -131,7 +146,7 @@ function generateRawReceiptContent(data) {
     guests = 2,
     items = [],
     subtotal = 0,
-    service_percent = 10,
+    service_percent = 10, // ✅ Default 10%
     service_amount = 0,
     tax_percent = 12,
     tax_amount = 0,
@@ -141,6 +156,59 @@ function generateRawReceiptContent(data) {
     show_qr = false,
     order_number = "#001",
   } = data;
+
+  // ✅ TUZATILDI: Service calculation logic
+  let actualServiceAmount = service_amount;
+  let actualServicePercent = service_percent;
+
+  console.log("🔍 Service calculation input:", {
+    service_percent,
+    service_amount,
+    subtotal,
+  });
+
+  // ✅ Agar service_amount 0 bo'lsa va service_percent bor bo'lsa
+  if (
+    (!service_amount || service_amount === 0) &&
+    service_percent > 0 &&
+    subtotal > 0
+  ) {
+    actualServiceAmount = Math.round((subtotal * service_percent) / 100);
+    console.log(
+      `🔄 Service amount hisoblandi: ${subtotal} * ${service_percent}% = ${actualServiceAmount}`
+    );
+  }
+
+  // ✅ Agar service_percent undefined yoki 0 bo'lsa va service_amount bor bo'lsa
+  if (
+    (!service_percent || service_percent === 0) &&
+    service_amount > 0 &&
+    subtotal > 0
+  ) {
+    actualServicePercent = Math.round((service_amount / subtotal) * 100);
+    console.log(
+      `🔄 Service percent hisoblandi: ${service_amount}/${subtotal} = ${actualServicePercent}%`
+    );
+  }
+
+  // ✅ Agar ikkalasi ham 0 yoki undefined bo'lsa, default 10%
+  if (
+    (!service_percent || service_percent === 0) &&
+    (!service_amount || service_amount === 0) &&
+    subtotal > 0
+  ) {
+    actualServicePercent = 10;
+    actualServiceAmount = Math.round((subtotal * 10) / 100);
+    console.log(
+      `⚠️ Default 10% ishlatildi: ${subtotal} * 10% = ${actualServiceAmount}`
+    );
+  }
+
+  console.log("💰 Final service calculation:", {
+    actualServicePercent,
+    actualServiceAmount,
+    willShowService: actualServiceAmount > 0,
+  });
 
   // ✅ ESC/POS komandalar
   const ESC = "\x1B";
@@ -212,38 +280,62 @@ function generateRawReceiptContent(data) {
   // ✅ Totals (professional)
   content += ALIGN_LEFT + SIZE_SMALL;
   if (subtotal > 0) {
-    content += `Summa: ${formatPriceNormal(subtotal)}\n`;
+    content += `Taomlar:              ${formatPriceNormal(subtotal)}\n`;
   }
   content += "\n";
-  if (service_amount > 0) {
-    content += `Ofitsiant xizmati (${service_percent}%): ${formatPriceNormal(
-      service_amount
+
+  // ✅ TUZATILDI: Service qatori
+  if (actualServiceAmount > 0) {
+    content += `Ofitsiant xizmati (${5}%): ${formatPriceNormal(
+      actualServiceAmount
     )}\n`;
+    console.log(
+      `✅ Service qatori qo'shildi: ${5}% = ${actualServiceAmount}`
+    );
+  } else {
+    console.log(
+      `⚠️ Service qatori qo'shilmadi: actualServiceAmount = ${actualServiceAmount}`
+    );
   }
+
   if (tax_amount > 0) {
-    content += `Nalog (${tax_percent}%):             ${formatPriceNormal(
+    content += `Soliq (${tax_percent}%):       ${formatPriceNormal(
       tax_amount
     )}\n`;
   }
 
-  // ✅ Final separator
   content += "================================\n";
 
-  // ✅ TOTAL (bold and larger)
+  // ✅ TOTAL (bold and larger) - qayta hisoblash
+  const calculatedTotal = subtotal + actualServiceAmount + tax_amount;
   content += BOLD_ON + SIZE_NORMAL;
-  content += `JAMI:  ${formatPriceNormal(total_amount)}\n`;
+  content += `JAMI:           ${formatPriceNormal(calculatedTotal)}\n`;
   content += BOLD_OFF + SIZE_SMALL;
 
   // ✅ Professional footer
   content += ALIGN_CENTER;
+  content += "\n";
+  content += footer_text + "\n";
+  content += "\n";
 
   // ✅ Cut paper
   content += CUT;
+
+  console.log("✅ Receipt generation completed:", {
+    contentLength: content.length,
+    calculatedTotal,
+    serviceIncluded: actualServiceAmount > 0,
+    serviceAmount: actualServiceAmount,
+    servicePercent: actualServicePercent,
+  });
+
   return content;
 }
 
-// ✅ Price formatting (o'zgarishsiz)
+// ✅ Price formatting (yaxshilandi)
 function formatPriceNormal(price) {
+  if (!price || price === 0) return "0";
+
   if (price >= 1000) {
     return (
       Math.floor(price / 1000) + " " + String(price % 1000).padStart(3, "0")
