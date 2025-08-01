@@ -1,5 +1,16 @@
 const mongoose = require("mongoose");
 
+const subcategorySchema = new mongoose.Schema(
+  {
+    title: {
+      type: String,
+      required: [true, "Subkategoriya nomi majburiy"],
+      trim: true,
+    },
+  },
+  { _id: false } // subkategoriya uchun alohida _id kerak emas
+);
+
 const categorySchema = new mongoose.Schema(
   {
     title: {
@@ -10,9 +21,10 @@ const categorySchema = new mongoose.Schema(
     },
     printer_id: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "Printer", // 👉 printer model bilan bog'laymiz
+      ref: "Printer",
       default: null,
     },
+    subcategories: [subcategorySchema], // subkategoriyalar ichki massiv sifatida
   },
   {
     timestamps: true,

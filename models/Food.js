@@ -18,6 +18,10 @@ const foodSchema = new mongoose.Schema(
       required: [true, "Kategoriya majburiy"],
       trim: true,
     },
+    subcategory: {
+      type: String, // Subkategoriya nomi matn bo‘lib keladi
+      default: "",
+    },
     department_id: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Department",
@@ -32,17 +36,18 @@ const foodSchema = new mongoose.Schema(
       required: [true, "Birlik tanlanishi shart"],
     },
 
-    // ✅ Mahsulot soni (sklad uchun)
-    quantity: {
+    // 🟢 1. Skladdagi mavjud soni
+    soni: {
       type: Number,
+      required: [true, "Soni (sklad) majburiy"],
+      min: [0, "Soni manfiy bo‘lishi mumkin emas"],
       default: 0,
-      min: [0, "Mahsulot soni manfiy bo‘lishi mumkin emas"],
     },
 
-    // ✅ Yaroqlilik muddati (srok)
-    expiration_date: {
+    // 🟢 2. Yaroqlilik muddati (sana formatida)
+    expiration: {
       type: Date,
-      required: [true, "Yaroqlilik muddati (srok) kiritilishi kerak"],
+      default: null,
     },
   },
   {

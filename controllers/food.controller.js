@@ -8,19 +8,20 @@ const createFood = async (req, res) => {
       name,
       price,
       category,
+      subcategory,
       department_id,
       unit,
-      quantity,
-      expiration_date,
+      soni,
+      expiration,
     } = req.body;
 
     if (
       !name ||
-      price === undefined ||
+      !price ||
       !category ||
       !department_id ||
       !unit ||
-      expiration_date === undefined
+      soni == null
     ) {
       return res
         .status(400)
@@ -36,11 +37,12 @@ const createFood = async (req, res) => {
       name,
       price,
       category,
+      subcategory: subcategory || "",
       department_id,
       warehouse: department.warehouse,
       unit,
-      quantity: quantity || 0,
-      expiration_date,
+      soni,
+      expiration: expiration || null,
     });
 
     res.status(201).json({
@@ -73,19 +75,20 @@ const updateFood = async (req, res) => {
       name,
       price,
       category,
+      subcategory,
       department_id,
       unit,
-      quantity,
-      expiration_date,
+      soni,
+      expiration,
     } = req.body;
 
     if (
       !name ||
-      price === undefined ||
+      !price ||
       !category ||
       !department_id ||
       !unit ||
-      expiration_date === undefined
+      soni == null
     ) {
       return res
         .status(400)
@@ -103,11 +106,12 @@ const updateFood = async (req, res) => {
         name,
         price,
         category,
+        subcategory: subcategory || "",
         department_id,
         warehouse: department.warehouse,
         unit,
-        quantity: quantity || 0,
-        expiration_date,
+        soni,
+        expiration: expiration || null,
       },
       { new: true, runValidators: true }
     );

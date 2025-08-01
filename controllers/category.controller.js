@@ -1,21 +1,28 @@
 const Category = require("../models/Category");
 
-// ➕ Kategoriya yaratish
+// ➕ Kategoriya yaratish (subcategories bilan)
 const createCategory = async (req, res) => {
   try {
-    const { title, printer_id } = req.body;
+    const { title, printer_id, subcategories = [] } = req.body;
 
-    // Tekshir: shu nomli kategoriya mavjudmi
     const existing = await Category.findOne({ title });
     if (existing) {
-      return res
-        .status(400)
-        .json({ message: "Bu nomli kategoriya allaqachon mavjud" });
+      return res.status(400).json({ message: "Bu nomli kategoriya mavjud" });
     }
 
-    const newCategory = await Category.create({ title, printer_id });
+    // Subkategoriyalarni formatlash
+    const formattedSubcategories = subcategories.map((sub) =>
+      typeof sub === "string" ? { title: sub } : sub
+    );
+
+    const newCategory = await Category.create({
+      title,
+      printer_id: printer_id || null,
+      subcategories: formattedSubcategories,
+    });
+
     res.status(201).json({
-      message: "Kategoriya muvaffaqiyatli yaratildi",
+      message: "Kategoriya yaratildi",
       category: newCategory,
     });
   } catch (error) {
@@ -26,14 +33,14 @@ const createCategory = async (req, res) => {
   }
 };
 
-// 📋 Barcha kategoriyalar ro'yxati (printer_id bilan)
+// 📋 Barcha kategoriyalar ro'yxati (printer_id va subcategories bilan)
 const getCategories = async (req, res) => {
   try {
     const categories = await Category.find()
-      .populate("printer_id", "name ip") // Printer haqida asosiy info
+      .populate("printer_id", "name ip")
       .sort({ createdAt: -1 });
 
-    res.status(200).json(categories);
+    res.status(200).json({ categories });
   } catch (error) {
     res.status(500).json({
       message: "Serverda xatolik",
@@ -42,19 +49,29 @@ const getCategories = async (req, res) => {
   }
 };
 
-// 📝 Kategoriya yangilash
+// 📝 Kategoriya yangilash (subcategories ni ham yangilaydi)
 const updateCategory = async (req, res) => {
   try {
-    const { title, printer_id } = req.body;
+    const { title, printer_id, subcategories = [] } = req.body;
+
+    const formattedSubcategories = subcategories.map((sub) =>
+      typeof sub === "string" ? { title: sub } : sub
+    );
 
     const updated = await Category.findByIdAndUpdate(
       req.params.id,
-      { title, printer_id },
+      {
+        title,
+        printer_id: printer_id || null,
+        subcategories: formattedSubcategories,
+      },
       { new: true, runValidators: true }
     );
 
     if (!updated) {
-      return res.status(404).json({ message: "Kategoriya topilmadi" });
+      return res.status(404).json({
+        message: "Kategoriya topilmadi",
+      });
     }
 
     res.status(200).json({
@@ -75,10 +92,14 @@ const deleteCategory = async (req, res) => {
     const deleted = await Category.findByIdAndDelete(req.params.id);
 
     if (!deleted) {
-      return res.status(404).json({ message: "Kategoriya topilmadi" });
+      return res.status(404).json({
+        message: "Kategoriya topilmadi",
+      });
     }
 
-    res.status(200).json({ message: "Kategoriya o‘chirildi" });
+    res.status(200).json({
+      message: "Kategoriya o‘chirildi",
+    });
   } catch (error) {
     res.status(500).json({
       message: "Serverda xatolik",
@@ -87,7 +108,6 @@ const deleteCategory = async (req, res) => {
   }
 };
 
-// ✅ Export
 module.exports = {
   createCategory,
   getCategories,
