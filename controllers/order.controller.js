@@ -423,6 +423,7 @@ const closeOrder = async (req, res) => {
 
 
 // ✅ YANGI ZAKAZ YARATISH - STOL STATUSINI BAND QILISH BILAN
+// ✅ YANGI ZAKAZ YARATISH - STOL STATUSINI BAND QILISH VA TAOM MIQDORINI KAMAYTIRISH
 const createOrder = async (req, res) => {
   const session = await Food.startSession();
   session.startTransaction();
@@ -510,7 +511,7 @@ const createOrder = async (req, res) => {
     const updatedItems = [];
     let calculatedTotal = 0; // ✅ Haqiqiy summani tekshirish uchun
 
-    // ✅ Items'ni parallel emas, ketma-ket qayta ishlash (transaction xavfsizligi uchun)
+    // ✅ MUHIM: Items'ni ketma-ket qayta ishlash (transaction xavfsizligi uchun)
     for (const item of items) {
       const { food_id, quantity } = item;
 
@@ -539,6 +540,12 @@ const createOrder = async (req, res) => {
         });
       }
 
+      console.log(`🍽️ Taom tekshirilmoqda: ${food.name}`, {
+        mavjud_soni: food.soni,
+        soralgan_miqdor: quantity,
+        taom_id: food_id
+      });
+
       // ✅ Taom faol emasligini tekshirish
       if (food.is_active === false) {
         await session.abortTransaction();
@@ -557,11 +564,18 @@ const createOrder = async (req, res) => {
         });
       }
 
-      // ✅ Ombordagi miqdorni tekshirish
-      if (food.quantity < quantity) {
+      // ✅ ASOSIY: Ombordagi miqdorni tekshirish (soni maydonidan)
+      if (food.soni < quantity) {
         await session.abortTransaction();
         return res.status(400).json({
-          message: `Omborda yetarli miqdor yo'q: ${food.name} (mavjud: ${food.quantity}, so'ralgan: ${quantity})`,
+          success: false,
+          message: `❌ Omborda yetarli miqdor yo'q!`,
+          details: {
+            taom_nomi: food.name,
+            mavjud_miqdor: food.soni,
+            soralgan_miqdor: quantity,
+            kamomad: quantity - food.soni
+          }
         });
       }
 
@@ -573,8 +587,17 @@ const createOrder = async (req, res) => {
         });
       }
 
-      // Miqdorni kamaytirish
-      food.quantity -= quantity;
+      // 🟢 MUHIM: Miqdorni kamaytirish (soni maydonini ishlatish)
+      const oldQuantity = food.soni;
+      food.soni -= quantity;
+      
+      console.log(`📉 Miqdor yangilandi: ${food.name}`, {
+        eski_miqdor: oldQuantity,
+        soralgan: quantity,
+        yangi_miqdor: food.soni
+      });
+
+      // Bazaga saqlash
       await food.save({ session });
 
       // ✅ Kategoriya va printer tekshirish
@@ -616,6 +639,9 @@ const createOrder = async (req, res) => {
         printer_id: category.printer_id || null,
         printer_ip: printer?.ip || null,
         printer_name: printer?.name || null,
+        // 🟢 Miqdor ma'lumotlari debug uchun
+        previous_stock: oldQuantity,
+        remaining_stock: food.soni
       });
     }
 
@@ -763,7 +789,7 @@ const createOrder = async (req, res) => {
     // ✅ Success response yaxshilandi
     const response = {
       success: true,
-      message: "Zakaz muvaffaqiyatli yaratildi",
+      message: "Zakaz muvaffaqiyatli yaratildi va taom miqdorlari yangilandi",
       order: {
         id: newOrder._id,
         order_number:
@@ -778,6 +804,14 @@ const createOrder = async (req, res) => {
         status: newOrder.status,
         created_at: newOrder.created_at,
       },
+      // 🟢 Miqdor yangilanish ma'lumotlari
+      inventory_updates: updatedItems.map(item => ({
+        taom_nomi: item.name,
+        buyurtma_miqdori: item.quantity,
+        oldingi_miqdor: item.previous_stock,
+        qolgan_miqdor: item.remaining_stock,
+        unit: "dona" // yoki tegishli birlik
+      })),
       printing: {
         total_printers: Object.keys(printerGroups).length,
         printable_items: totalPrintableItems,
@@ -799,6 +833,7 @@ const createOrder = async (req, res) => {
       total_amount: calculatedTotal,
       service_amount: serviceAmount,
       final_total: finalTotal,
+      inventory_updated: true
     });
 
     res.status(201).json(response);
