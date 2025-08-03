@@ -839,21 +839,18 @@ const createOrder = async (req, res) => {
 
 
 
+// orderController.js ichidagi processPayment funksiyasini almashtiring:
+
 const processPayment = async (req, res) => {
   try {
     const { orderId } = req.params;
     const { paymentMethod, paymentAmount, changeAmount, mixedPayment, notes } = req.body;
     const userId = req.user?.id;
+    const userName = req.user?.first_name || 'Kassir';
 
-    console.log("💰 To'lov qabul qilish:", {
-      orderId,
-      paymentMethod,
-      paymentAmount,
-      changeAmount,
-      mixedPayment,
-      notes,
-      userId,
-    });
+    console.log("💰 To'lov qabul qilish - req.body:", req.body);
+    console.log("💰 Payment method received:", paymentMethod);
+    console.log("💰 Payment method type:", typeof paymentMethod);
 
     const order = await Order.findById(orderId)
       .populate("user_id", "first_name last_name")
@@ -875,12 +872,31 @@ const processPayment = async (req, res) => {
       });
     }
 
-    // ✅ YANGILANGAN TO'LOV USULLARI (click qo'shildi)
+    // ✅ TUZATISH: paymentMethod'ni to'g'ri olish
+    // Frontend'dan kelayotgan ma'lumotni tekshirish
+    let actualPaymentMethod = paymentMethod;
+    
+    // Agar req.body ichida paymentData bor bo'lsa, undan olish
+    if (req.body.paymentData && req.body.paymentData.paymentMethod) {
+      actualPaymentMethod = req.body.paymentData.paymentMethod;
+    }
+    
+    console.log("💰 Actual payment method:", actualPaymentMethod);
+
+    // ✅ YANGILANGAN TO'LOV USULLARI VALIDATSIYASI
     const validPaymentMethods = ["cash", "card", "click", "transfer", "mixed"];
-    if (!validPaymentMethods.includes(paymentMethod)) {
+    if (!validPaymentMethods.includes(actualPaymentMethod)) {
+      console.error("❌ Invalid payment method received:", {
+        received: actualPaymentMethod,
+        type: typeof actualPaymentMethod,
+        valid_methods: validPaymentMethods,
+        full_req_body: req.body
+      });
+      
       return res.status(400).json({
         success: false,
         message: "Noto'g'ri to'lov usuli",
+        received_method: actualPaymentMethod,
         valid_methods: validPaymentMethods,
         available_methods: {
           cash: "Naqd to'lov",
@@ -893,15 +909,22 @@ const processPayment = async (req, res) => {
     }
 
     // ✅ ARALASH TO'LOV VALIDATSIYASI
-    if (paymentMethod === "mixed") {
-      if (!mixedPayment) {
+    if (actualPaymentMethod === "mixed") {
+      let mixedPaymentData = mixedPayment;
+      
+      // Agar req.body.paymentData ichida bo'lsa
+      if (req.body.paymentData && req.body.paymentData.mixedPayment) {
+        mixedPaymentData = req.body.paymentData.mixedPayment;
+      }
+      
+      if (!mixedPaymentData) {
         return res.status(400).json({
           success: false,
           message: "Aralash to'lov uchun mixedPayment ma'lumotlari kerak",
         });
       }
 
-      const { cashAmount = 0, cardAmount = 0, totalAmount } = mixedPayment;
+      const { cashAmount = 0, cardAmount = 0 } = mixedPaymentData;
 
       if (Number(cashAmount) < 0 || Number(cardAmount) < 0) {
         return res.status(400).json({
@@ -931,62 +954,90 @@ const processPayment = async (req, res) => {
 
     } else {
       // ✅ ODDIY TO'LOV VALIDATSIYASI
-      if (!paymentAmount || Number(paymentAmount) <= 0) {
+      let actualPaymentAmount = paymentAmount;
+      
+      // paymentData ichidan olish
+      if (req.body.paymentData && req.body.paymentData.paymentAmount) {
+        actualPaymentAmount = req.body.paymentData.paymentAmount;
+      }
+      
+      if (!actualPaymentAmount || Number(actualPaymentAmount) <= 0) {
         return res.status(400).json({
           success: false,
           message: "To'lov summasi noto'g'ri yoki kiritilmagan",
+          received_amount: actualPaymentAmount
         });
       }
 
-      if (paymentMethod === "cash") {
-        if (Number(paymentAmount) < order.final_total) {
+      if (actualPaymentMethod === "cash") {
+        if (Number(actualPaymentAmount) < order.final_total) {
           return res.status(400).json({
             success: false,
-            message: `Naqd to'lov summasi yetarli emas! Kerak: ${order.final_total}, Kiritildi: ${paymentAmount}`,
+            message: `Naqd to'lov summasi yetarli emas! Kerak: ${order.final_total}, Kiritildi: ${actualPaymentAmount}`,
           });
         }
       } else {
         // ✅ Karta, Click va Transfer uchun aniq summa
-        if (Math.abs(Number(paymentAmount) - order.final_total) > 1) {
+        if (Math.abs(Number(actualPaymentAmount) - order.final_total) > 1) {
           return res.status(400).json({
             success: false,
             message: `${
-              paymentMethod === 'card' ? 'Karta' : 
-              paymentMethod === 'click' ? 'Click' : 
-              paymentMethod === 'transfer' ? 'Transfer' : paymentMethod
+              actualPaymentMethod === 'card' ? 'Karta' : 
+              actualPaymentMethod === 'click' ? 'Click' : 
+              actualPaymentMethod === 'transfer' ? 'Transfer' : actualPaymentMethod
             } to'lov aniq summa bo'lishi kerak`,
             required: order.final_total,
-            provided: paymentAmount,
-            method: paymentMethod
+            provided: actualPaymentAmount,
+            method: actualPaymentMethod
           });
         }
       }
     }
 
     // ✅ TO'LOV MA'LUMOTLARINI TAYYORLASH
-    const paymentData = {};
+    const paymentData = {
+      paymentMethod: actualPaymentMethod,
+      notes: notes || req.body.paymentData?.notes
+    };
 
-    if (paymentMethod === "mixed") {
-      const { cashAmount = 0, cardAmount = 0 } = mixedPayment;
+    if (actualPaymentMethod === "mixed") {
+      let mixedPaymentData = mixedPayment || req.body.paymentData?.mixedPayment;
+      const { cashAmount = 0, cardAmount = 0 } = mixedPaymentData;
       const calculatedTotal = Number(cashAmount) + Number(cardAmount);
       
       paymentData.mixedPayment = {
         cashAmount: Number(cashAmount),
         cardAmount: Number(cardAmount),
         totalAmount: calculatedTotal,
-        changeAmount: Number(changeAmount) || 0,
+        changeAmount: Number(changeAmount) || Number(req.body.paymentData?.changeAmount) || 0,
       };
       paymentData.paymentAmount = calculatedTotal;
-      paymentData.changeAmount = Number(changeAmount) || 0;
+      paymentData.changeAmount = Number(changeAmount) || Number(req.body.paymentData?.changeAmount) || 0;
     } else {
-      paymentData.paymentAmount = Number(paymentAmount);
-      paymentData.changeAmount = Number(changeAmount) || 0;
+      let actualPaymentAmount = paymentAmount || req.body.paymentData?.paymentAmount;
+      let actualChangeAmount = changeAmount || req.body.paymentData?.changeAmount;
+      
+      paymentData.paymentAmount = Number(actualPaymentAmount);
+      paymentData.changeAmount = Number(actualChangeAmount) || 0;
     }
 
-    // ✅ TO'LOVNI QAYD QILISH
-    await order.processPayment(userId, paymentMethod, notes, paymentData);
+    console.log("💰 Final payment data:", paymentData);
 
-    // ✅ STOL STATUSINI BO'SH QILISH
+    // ✅ 1. ORDER'DA TO'LOVNI QAYD QILISH
+    await order.processPayment(userId, actualPaymentMethod, paymentData.notes, paymentData);
+
+    // ✅ 2. ALOHIDA PAYMENT BAZASIGA SAQLASH
+    let paymentRecord = null;
+    try {
+      const { savePaymentToDatabase } = require('./paymentController');
+      paymentRecord = await savePaymentToDatabase(order, paymentData, userId, userName);
+      console.log('✅ To\'lov payment jadvaliga saqlandi:', paymentRecord?._id);
+    } catch (paymentSaveError) {
+      console.error('❌ Payment jadvaliga saqlashda xatolik:', paymentSaveError);
+      // Bu xatolik order'ni buzmasin, faqat log qilamiz
+    }
+
+    // ✅ 3. STOL STATUSINI BO'SH QILISH
     if (order.table_id) {
       const tableUpdateResult = await updateTableStatus(order.table_id, "bo'sh");
       console.log("📋 To'lov tugagach stol bo'shatish natijasi:", tableUpdateResult);
@@ -1009,14 +1060,16 @@ const processPayment = async (req, res) => {
       },
 
       payment: {
-        method: paymentMethod,
+        id: paymentRecord?._id,
+        method: actualPaymentMethod,
         amount: order.final_total,
         payment_amount: order.paymentAmount,
         change_amount: order.changeAmount,
         currency: "UZS",
-        notes: notes || null,
+        notes: paymentData.notes || null,
         processed_at: order.paidAt,
         processed_by: userId,
+        saved_to_payment_db: !!paymentRecord,
       },
 
       waiter: {
@@ -1037,7 +1090,7 @@ const processPayment = async (req, res) => {
         message: "To'lov tugagach stol avtomatik bo'shatildi",
       },
 
-      mixed_payment_details: paymentMethod === "mixed" ? {
+      mixed_payment_details: actualPaymentMethod === "mixed" ? {
         cash_amount: order.mixedPaymentDetails?.cashAmount || 0,
         card_amount: order.mixedPaymentDetails?.cardAmount || 0,
         total_amount: order.mixedPaymentDetails?.totalAmount || 0,
@@ -1058,7 +1111,8 @@ const processPayment = async (req, res) => {
       debug: {
         orderId: req.params.orderId,
         paymentMethod: req.body.paymentMethod,
-        paymentAmount: req.body.paymentAmount,
+        paymentData: req.body.paymentData,
+        full_body: req.body,
         timestamp: new Date().toISOString(),
       },
     });
@@ -1368,7 +1422,6 @@ const getCompletedOrders = async (req, res) => {
 
 const getPendingPayments = async (req, res) => {
   try {
-    console.log("📊 Kassir dashboard - pending payments");
 
     const orders = await Order.getPendingPayments();
 

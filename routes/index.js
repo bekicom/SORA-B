@@ -15,6 +15,7 @@ const order = require("../controllers/order.controller");
 const printer = require("../controllers/printer.controller");
 const setting = require("../controllers/settings.controller");
 const client = require("../controllers/clientController");
+const payment = require("../controllers/paymentController"); // ✅ YANGI QOSHILDI
 
 // ===== AUTH =====
 router.post("/auth/login", auth.login);
@@ -80,12 +81,6 @@ router.put("/orders/status/:orderId", authMiddleware, order.updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, order.deleteOrder);
 router.get("/orders/busy-tables", authMiddleware, order.getBusyTables);
 router.get("/orders/my-pending", authMiddleware, order.getMyPendingOrders);
-// ✅ KASSIR WORKFLOW - To'lov qabul qilish
-router.post(
-  "/orders/process-payment/:orderId",
-  authMiddleware,
-  order.processPayment
-);
 
 // ✅ KASSIR WORKFLOW ROUTES
 // Ofitsiant workflow
@@ -93,11 +88,13 @@ router.put("/orders/close/:orderId", authMiddleware, order.closeOrder); // ✅ U
 
 // Kassir workflow
 router.get("/orders/completed", authMiddleware, order.getCompletedOrders); // ✅ Kassir ro'yxati
+
 router.get(
   "/orders/pending-payments",
   authMiddleware,
   order.getPendingPayments
 ); // ✅ To'lov kutilayotganlar
+
 router.post(
   "/orders/kassir-print/:orderId",
   authMiddleware,
@@ -116,6 +113,32 @@ router.post(
   authMiddleware,
   order.printReceipt
 ); // ✅ Redirects to kassir print
+
+// ===== PAYMENTS (YANGI QOSHILDI) =====
+// ✅ TO'G'RI TARTIB: SPECIFIC ROUTES BIRINCHI BO'LISHI KERAK!
+
+// 1. SPECIFIC ROUTES (birinchi)
+router.get(
+  "/payments/daily-stats",
+  authMiddleware,
+  payment.getDailyPaymentStats
+);
+router.get(
+  "/payments/kassir-stats",
+  authMiddleware,
+  payment.getKassirPaymentStats
+);
+router.get(
+  "/payments/method-stats",
+  authMiddleware,
+  payment.getPaymentMethodStats
+);
+
+// 2. GENERIC ROUTES (keyin)
+router.get("/payments", authMiddleware, payment.getAllPayments);
+
+// 3. DYNAMIC ROUTES (eng oxirida)
+router.get("/payments/:paymentId", authMiddleware, payment.getPaymentById);
 
 // ===== PRINTERS =====
 router.post("/printers", authMiddleware, onlyAdmin, printer.createPrinter);
@@ -189,7 +212,7 @@ router.post(
   setting.createSettings
 );
 router.put(
-  "/settings/update", 
+  "/settings/update",
   authMiddleware,
   onlyAdmin,
   setting.updateSettings
@@ -220,17 +243,31 @@ router.post(
 ); // Kassir print
 router.post("/kassir/payment/:orderId", authMiddleware, order.processPayment); // Process payment
 
+// ✅ KASSIR PAYMENT ROUTES (SPECIFIC ROUTES BIRINCHI)
+router.get(
+  "/kassir/payments/stats",
+  authMiddleware,
+  payment.getDailyPaymentStats
+); // Kassir statistika
+router.get(
+  "/kassir/my-payments",
+  authMiddleware,
+  payment.getKassirPaymentStats
+); // Kassir shaxsiy statistika
+router.get("/kassir/payments", authMiddleware, payment.getAllPayments); // Kassir uchun to'lovlar
+
 // ===== HEALTH CHECK =====
 router.get("/health", (req, res) => {
   res.status(200).json({
     success: true,
     message: "API ishlayapti",
     timestamp: new Date().toISOString(),
-    version: "2.0.0", // ✅ Version updated for kassir workflow
+    version: "2.1.0", // ✅ Version updated for payment system
     features: {
       kassir_workflow: true,
       html_to_image_print: true,
       payment_processing: true,
+      payment_tracking: true, // ✅ YANGI FEATURE
     },
   });
 });
@@ -248,6 +285,8 @@ if (process.env.NODE_ENV === "development") {
           // ✅ Add route categories for debugging
           category: middleware.route.path.includes("/kassir")
             ? "kassir"
+            : middleware.route.path.includes("/payments")
+            ? "payments" // ✅ YANGI CATEGORY
             : middleware.route.path.includes("/orders")
             ? "orders"
             : middleware.route.path.includes("/settings")
@@ -270,6 +309,7 @@ if (process.env.NODE_ENV === "development") {
       total_routes: routes.length,
       routes_by_category: routesByCategory,
       kassir_routes: routes.filter((r) => r.category === "kassir"),
+      payment_routes: routes.filter((r) => r.category === "payments"), // ✅ YANGI
       timestamp: new Date().toISOString(),
     });
   });
@@ -284,12 +324,26 @@ if (process.env.NODE_ENV === "development") {
         status: "paid",
       });
 
+      // ✅ PAYMENT STATISTICS
+      const paymentCount = await require("../models/Payment").countDocuments({
+        status: "completed",
+      });
+      const todayPayments = await require("../models/Payment").countDocuments({
+        status: "completed",
+        payment_date: new Date().toISOString().split("T")[0],
+      });
+
       res.json({
         success: true,
         kassir_workflow: {
           pending_payments: pendingCount,
           paid_orders: paidCount,
           total_processed: pendingCount + paidCount,
+        },
+        payment_system: {
+          // ✅ YANGI
+          total_payments: paymentCount,
+          today_payments: todayPayments,
         },
         timestamp: new Date().toISOString(),
       });
