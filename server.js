@@ -181,6 +181,7 @@ setInterval(() => {
 }, 30 * 60 * 1000);
 
 // 🔎 Monitoring endpoint
+// 🔎 Monitoring endpoint
 app.get("/api/socket-info", (req, res) => {
   const list = Array.from(lockedTables.entries()).map(([tableId, info]) => ({
     tableId,
@@ -195,6 +196,7 @@ app.get("/api/socket-info", (req, res) => {
     totalConnections: io.engine.clientsCount,
   });
 });
+
 
 // ✅ PORT va IP
 const PORT = process.env.PORT || 5000;
