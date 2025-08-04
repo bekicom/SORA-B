@@ -18,7 +18,8 @@ const server = http.createServer(app);
 const allowedOrigins = [
   "http://localhost:5173", // frontend local dev
   "http://localhost:3000", // agar ishlatilsa
-  "https://sora.richman.uz", // production
+  "https://sora.richman.uz",
+  "https://sora-f.vercel.app", // production
 ];
 
 // ✅ Express uchun CORS
@@ -194,7 +195,6 @@ app.get("/api/socket-info", (req, res) => {
     totalConnections: io.engine.clientsCount,
   });
 });
-
 
 // 🚀 Serverni ishga tushirish
 const PORT = process.env.PORT || 5000;

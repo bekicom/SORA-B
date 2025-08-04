@@ -16,24 +16,20 @@ const printer = require("../controllers/printer.controller");
 const setting = require("../controllers/settings.controller");
 const client = require("../controllers/clientController");
 const payment = require("../controllers/paymentController"); // ✅ YANGI QOSHILDI
-
 // ===== AUTH =====
 router.post("/auth/login", auth.login);
 router.post("/auth/register", auth.register);
 router.get("/auth/me", authMiddleware, auth.getMe);
-
 // ===== USERS =====
 router.post("/users", authMiddleware, onlyAdmin, user.createUser);
 router.get("/users", user.getAllUsers);
 router.put("/users/:id", authMiddleware, user.updateUser);
 router.delete("/users/:id", authMiddleware, user.deleteUser);
-
 // ===== TABLES =====
 router.post("/tables/create", authMiddleware, table.createTable);
 router.get("/tables/list", authMiddleware, table.getTables);
 router.put("/tables/update/:id", authMiddleware, table.updateTable);
 router.delete("/tables/delete/:id", authMiddleware, table.deleteTable);
-
 // ===== CATEGORIES =====
 router.post("/categories/create", authMiddleware, category.createCategory);
 router.get("/categories/list", authMiddleware, category.getCategories);
@@ -43,13 +39,11 @@ router.delete(
   authMiddleware,
   category.deleteCategory
 );
-
 // ===== FOODS =====
 router.post("/foods/create", authMiddleware, food.createFood);
 router.get("/foods/list", authMiddleware, food.getAllFoods);
 router.put("/foods/update/:id", authMiddleware, food.updateFood);
 router.delete("/foods/delete/:id", authMiddleware, food.deleteFood);
-
 // ===== IMAGE UPLOAD =====
 router.post("/upload", upload.single("image"), (req, res) => {
   if (!req.file) return res.status(400).json({ message: "Rasm yuklanmadi" });
@@ -58,7 +52,6 @@ router.post("/upload", upload.single("image"), (req, res) => {
   }`;
   res.status(200).json({ imageUrl });
 });
-
 // ===== DEPARTMENTS =====
 router.post("/departments/create", authMiddleware, department.createDepartment);
 router.get("/departments/list", authMiddleware, department.getAllDepartments);
@@ -72,23 +65,15 @@ router.delete(
   authMiddleware,
   department.deleteDepartment
 );
-
 // ===== ORDERS =====
-// Basic order operations
 router.post("/orders/create", authMiddleware, order.createOrder);
 router.get("/orders/table/:tableId", authMiddleware, order.getOrdersByTable);
 router.put("/orders/status/:orderId", authMiddleware, order.updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, order.deleteOrder);
 router.get("/orders/busy-tables", authMiddleware, order.getBusyTables);
 router.get("/orders/my-pending", authMiddleware, order.getMyPendingOrders);
-
-// ✅ KASSIR WORKFLOW ROUTES
-// Ofitsiant workflow
 router.put("/orders/close/:orderId", authMiddleware, order.closeOrder); // ✅ Updated - chek chiqarmaydi
-
-// Kassir workflow
 router.get("/orders/completed", authMiddleware, order.getCompletedOrders); // ✅ Kassir ro'yxati
-
 router.get(
   "/orders/pending-payments",
   authMiddleware,
