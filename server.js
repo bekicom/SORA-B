@@ -14,13 +14,14 @@ dotenv.config();
 const app = express();
 const server = http.createServer(app);
 
-// ✅ Ruxsat berilgan subdomenlar ro‘yxati
+// ✅ Ruxsat berilgan manzillar
 const allowedOrigins = [
-  "https://sora.richman.uz", // asosiy subdomen
-  "http://localhost:3000", // test uchun (ixtiyoriy)
+  "http://localhost:5173", // frontend local dev
+  "http://localhost:3000", // agar ishlatilsa
+  "https://sora.richman.uz", // production
 ];
 
-// ✅ Express uchun CORS sozlamasi
+// ✅ Express uchun CORS
 app.use(
   cors({
     origin: function (origin, callback) {
@@ -46,7 +47,7 @@ connectDB();
 // ✅ API router
 app.use("/api", mainRoutes);
 
-// ✅ Socket.IO server
+// ✅ Socket.IO ulanish
 const io = new Server(server, {
   cors: {
     origin: allowedOrigins,
@@ -55,11 +56,9 @@ const io = new Server(server, {
   },
 });
 
-// 🔐 Locked stollar va foydalanuvchi socketlar
 const lockedTables = new Map(); // tableId -> { userId, ... }
 const userSockets = new Map(); // userId -> socketId
 
-// 🧠 Socket logika
 io.on("connection", (socket) => {
   console.log("🔌 Yangi ulanish:", socket.id);
 
@@ -163,7 +162,7 @@ io.on("connection", (socket) => {
   });
 });
 
-// 🔁 Har 30 daqiqada lock tozalash
+// 🔁 Har 30 daqiqada avtomatik lock tozalash
 setInterval(() => {
   const now = Date.now();
   const threshold = now - 30 * 60 * 1000;
@@ -181,7 +180,6 @@ setInterval(() => {
 }, 30 * 60 * 1000);
 
 // 🔎 Monitoring endpoint
-// 🔎 Monitoring endpoint
 app.get("/api/socket-info", (req, res) => {
   const list = Array.from(lockedTables.entries()).map(([tableId, info]) => ({
     tableId,
@@ -197,8 +195,7 @@ app.get("/api/socket-info", (req, res) => {
   });
 });
 
-
-// ✅ PORT va IP
+// 🚀 Serverni ishga tushirish
 const PORT = process.env.PORT || 5000;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server ishga tushdi: http://0.0.0.0:${PORT}`);
