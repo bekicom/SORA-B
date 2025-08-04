@@ -272,7 +272,6 @@ router.get("/health", (req, res) => {
   });
 });
 
-// ===== DEBUG (DEVELOPMENT ONLY) =====
 if (process.env.NODE_ENV === "development") {
   router.get("/debug/routes", (req, res) => {
     const routes = [];
