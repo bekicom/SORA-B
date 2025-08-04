@@ -13,33 +13,47 @@ dotenv.config();
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-  cors: {
-    origin: "*", // yoki: "https://your-vercel-url.vercel.app"
-    methods: ["GET", "POST"],
-    credentials: true,
-  },
-});
 
-// CORS sozlamasi
+// ✅ Ruxsat berilgan subdomenlar ro‘yxati
+const allowedOrigins = [
+  "https://sora.richman.uz", // asosiy subdomen
+  "http://localhost:3000", // test uchun (ixtiyoriy)
+];
+
+// ✅ Express uchun CORS sozlamasi
 app.use(
   cors({
-    origin: "*", // yoki: "https://your-vercel-url.vercel.app"
+    origin: function (origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("CORS bloklandi: " + origin));
+      }
+    },
     credentials: true,
   })
 );
 
-// JSON tanib olish
+// ✅ JSON tanib olish
 app.use(express.json());
 
-// Printer server integratsiyasi
+// ✅ Printer server integratsiyasi
 initPrinterServer(app);
 
-// MongoDB ulanish
+// ✅ MongoDB ulanish
 connectDB();
 
-// API router
+// ✅ API router
 app.use("/api", mainRoutes);
+
+// ✅ Socket.IO server
+const io = new Server(server, {
+  cors: {
+    origin: allowedOrigins,
+    methods: ["GET", "POST"],
+    credentials: true,
+  },
+});
 
 // 🔐 Locked stollar va foydalanuvchi socketlar
 const lockedTables = new Map(); // tableId -> { userId, ... }
@@ -140,7 +154,10 @@ io.on("connection", (socket) => {
     for (const [tableId, info] of lockedTables.entries()) {
       if (info.userId === userId) {
         lockedTables.delete(tableId);
-        socket.broadcast.emit("table_unlocked", { tableId, freedBy: userName });
+        socket.broadcast.emit("table_unlocked", {
+          tableId,
+          freedBy: userName,
+        });
       }
     }
   });
