@@ -16,10 +16,11 @@ const server = http.createServer(app);
 
 // ✅ Ruxsat berilgan manzillar
 const allowedOrigins = [
-  "http://localhost:5173", // frontend local dev
-  "http://localhost:3000", // agar ishlatilsa
+  "http://localhost:5173",
+  "http://localhost:3000",
   "https://sora.richman.uz",
-  "https://sora-f.vercel.app", // production
+  "https://sora-f.vercel.app",
+  "http://192.168.0.101:5173",
 ];
 
 // ✅ Express uchun CORS
@@ -57,117 +58,200 @@ const io = new Server(server, {
   },
 });
 
+// ✅ Stol va buyurtmalar uchun kolleksiyalar
 const lockedTables = new Map(); // tableId -> { userId, ... }
 const userSockets = new Map(); // userId -> socketId
+const activeOrders = new Map(); // orderId -> orderData
 
+// ✅ Real-time buyurtmalar uchun yangi funksiyalar
+function broadcastOrderUpdate(order) {
+  io.emit('order_updated', {
+    type: 'ORDER_UPDATE',
+    order: order,
+    timestamp: new Date()
+  });
+}
+
+function broadcastNewOrder(order) {
+  io.emit('new_order', {
+    type: 'NEW_ORDER',
+    order: order,
+    timestamp: new Date()
+  });
+}
+
+function notifyWaiter(waiterId, message) {
+  const socketId = userSockets.get(waiterId);
+  if (socketId) {
+    io.to(socketId).emit('waiter_notification', message);
+  }
+}
+
+// ✅ Socket.io connection handlers
 io.on("connection", (socket) => {
   console.log("🔌 Yangi ulanish:", socket.id);
 
-  socket.on("user_connected", ({ userId, userName }) => {
+  // Foydalanuvchi ulanganda
+  socket.on("user_connected", ({ userId, userName, role }) => {
     socket.userId = userId;
     socket.userName = userName;
+    socket.role = role;
+    
     userSockets.set(userId, socket.id);
-    socket.emit("locked_tables_list", Array.from(lockedTables.keys()));
+    
+    // Role'ga qarab roomga qo'shish
+    if (role === 'kassir') {
+      socket.join('kassir_room');
+      console.log(`💰 Kassir ulandi: ${userName} (${userId})`);
+    } else if (role === 'ofitsiant') {
+      socket.join(`waiter_${userId}`);
+      console.log(`🍽️ Ofitsiant ulandi: ${userName} (${userId})`);
+    }
+    
+    // Joriy holatni yuborish
+    socket.emit("initial_data", {
+      lockedTables: Array.from(lockedTables.entries()).map(([id, data]) => ({
+        tableId: id,
+        lockedBy: data.userName,
+        lockedAt: data.timestamp
+      })),
+      activeOrders: Array.from(activeOrders.values())
+    });
   });
 
-  socket.on("table_selected", (tableId) => {
-    const { userId, userName = "Noma'lum" } = socket;
-    if (
-      lockedTables.has(tableId) &&
-      lockedTables.get(tableId).userId !== userId
-    ) {
-      return socket.emit("table_lock_failed", {
-        tableId,
-        message: `Bu stol band: ${lockedTables.get(tableId).userName}`,
+
+
+  // Stol bo'shatilganda
+  socket.on("table_freed", (tableId) => {
+    const { userId } = socket;
+    const tableInfo = lockedTables.get(tableId);
+    
+    if (tableInfo && tableInfo.userId === userId) {
+      lockedTables.delete(tableId);
+      io.emit("table_unlocked", { 
+        tableId, 
+        freedBy: tableInfo.userName,
+        freedById: userId
       });
     }
-
-    lockedTables.set(tableId, {
-      userId,
-      userName,
-      timestamp: new Date().toISOString(),
-      socketId: socket.id,
-    });
-
-    socket.broadcast.emit("table_locked", { tableId, lockedBy: userName });
-    socket.emit("table_lock_success", { tableId });
   });
 
-  socket.on("table_freed", (tableId) => {
-    const { userId, userName = "Noma'lum" } = socket;
-    if (lockedTables.get(tableId)?.userId === userId) {
-      lockedTables.delete(tableId);
-      io.emit("table_unlocked", { tableId, freedBy: userName });
-      socket.emit("table_free_success", { tableId });
-    } else {
-      socket.emit("table_free_failed", { tableId, message: "Ruxsat yo‘q" });
+  // Yangi buyurtma yaratilganda
+  socket.on("order_created", (orderData) => {
+    try {
+      const { tableId, orderId, waiterId } = orderData;
+      
+      // Buyurtmani saqlash
+      activeOrders.set(orderId, {
+        ...orderData,
+        status: 'pending',
+        createdAt: new Date()
+      });
+      
+      // Barchaga bildirish
+      broadcastNewOrder(orderData);
+      
+      // Ofitsiantga xabar
+      notifyWaiter(waiterId, {
+        type: 'NEW_ORDER',
+        tableId,
+        orderId,
+        message: `Stol #${tableId} uchun yangi buyurtma`
+      });
+      
+      // Kassirlarga xabar
+      io.to('kassir_room').emit('pending_order_added', orderData);
+      
+    } catch (error) {
+      console.error('Buyurtma yaratishda xato:', error);
     }
   });
 
-  socket.on("free_all_my_tables", () => {
-    const { userId, userName = "Noma'lum" } = socket;
-    const userTables = [];
-
-    for (const [tableId, info] of lockedTables.entries()) {
-      if (info.userId === userId) {
-        userTables.push(tableId);
-        lockedTables.delete(tableId);
-        io.emit("table_unlocked", { tableId, freedBy: userName });
+  // Buyurtma statusi o'zgartirilganda
+  socket.on("order_status_changed", ({ orderId, newStatus, changedBy }) => {
+    const order = activeOrders.get(orderId);
+    if (order) {
+      const updatedOrder = {
+        ...order,
+        status: newStatus,
+        updatedAt: new Date(),
+        changedBy
+      };
+      
+      activeOrders.set(orderId, updatedOrder);
+      broadcastOrderUpdate(updatedOrder);
+      
+      // Agar buyurtma yakunlangan bo'lsa
+      if (newStatus === 'completed') {
+        activeOrders.delete(orderId);
+        
+        // Stolni bo'shatish
+        if (order.tableId && lockedTables.has(order.tableId)) {
+          lockedTables.delete(order.tableId);
+          io.emit("table_unlocked", {
+            tableId: order.tableId,
+            freedBy: changedBy,
+            reason: 'order_completed'
+          });
+        }
       }
     }
-
-    socket.emit("all_tables_freed", { tableIds: userTables });
   });
 
-  socket.on("get_locked_tables", () => {
-    const lockedList = Array.from(lockedTables.entries()).map(
-      ([tableId, info]) => ({
-        tableId,
-        lockedBy: info.userName,
-        lockedAt: info.timestamp,
-      })
-    );
-    socket.emit("locked_tables_list", lockedList);
-  });
-
-  socket.on("order_created", ({ tableId, orderId, orderNumber }) => {
-    io.emit("table_order_created", { tableId, orderId, orderNumber });
-  });
-
-  socket.on("order_completed", ({ tableId, orderId, orderNumber }) => {
-    io.emit("table_order_completed", { tableId, orderId, orderNumber });
-  });
-
-  socket.on("admin_force_unlock_all", ({ userName = "Admin" }) => {
-    const allTables = Array.from(lockedTables.keys());
-    lockedTables.clear();
-    io.emit("all_tables_force_unlocked", {
-      adminUser: userName,
-      unlockedTables: allTables,
-    });
-  });
-
-  socket.on("disconnect", () => {
-    const { userId, userName = "Noma'lum" } = socket;
-    userSockets.delete(userId);
-
-    for (const [tableId, info] of lockedTables.entries()) {
-      if (info.userId === userId) {
-        lockedTables.delete(tableId);
-        socket.broadcast.emit("table_unlocked", {
-          tableId,
-          freedBy: userName,
+  // Buyurtma bekor qilinganda
+  socket.on("order_cancelled", ({ orderId, reason, cancelledBy }) => {
+    const order = activeOrders.get(orderId);
+    if (order) {
+      activeOrders.delete(orderId);
+      
+      io.emit('order_cancelled', {
+        orderId,
+        tableId: order.tableId,
+        reason,
+        cancelledBy,
+        timestamp: new Date()
+      });
+      
+      // Stolni bo'shatish
+      if (order.tableId && lockedTables.has(order.tableId)) {
+        lockedTables.delete(order.tableId);
+        io.emit("table_unlocked", {
+          tableId: order.tableId,
+          freedBy: cancelledBy,
+          reason: 'order_cancelled'
         });
       }
     }
   });
+
+  // Disconnect handler
+  socket.on("disconnect", () => {
+    const { userId, userName = "Noma'lum" } = socket;
+    if (userId) {
+      userSockets.delete(userId);
+      
+      // Foydalanuvchi stollarini bo'shatish
+      for (const [tableId, info] of lockedTables.entries()) {
+        if (info.userId === userId) {
+          lockedTables.delete(tableId);
+          io.emit("table_unlocked", {
+            tableId,
+            freedBy: "System",
+            reason: "user_disconnected"
+          });
+        }
+      }
+    }
+    console.log(`❌ Ulanish tugatildi: ${socket.id}`);
+  });
 });
 
-// 🔁 Har 30 daqiqada avtomatik lock tozalash
+// 🔁 Har 30 daqiqada avtomatik tozalash
 setInterval(() => {
   const now = Date.now();
   const threshold = now - 30 * 60 * 1000;
 
+  // Stol locklarini tekshirish
   for (const [tableId, info] of lockedTables.entries()) {
     if (new Date(info.timestamp).getTime() < threshold) {
       lockedTables.delete(tableId);
@@ -178,26 +262,38 @@ setInterval(() => {
       });
     }
   }
+
+  // Eskirgan buyurtmalarni tekshirish
+  for (const [orderId, order] of activeOrders.entries()) {
+    if (new Date(order.createdAt).getTime() < threshold) {
+      activeOrders.delete(orderId);
+      io.emit("order_expired", {
+        orderId,
+        tableId: order.tableId,
+        reason: "timeout",
+      });
+    }
+  }
 }, 30 * 60 * 1000);
 
 // 🔎 Monitoring endpoint
 app.get("/api/socket-info", (req, res) => {
-  const list = Array.from(lockedTables.entries()).map(([tableId, info]) => ({
-    tableId,
-    lockedBy: info.userName,
-    timestamp: info.timestamp,
-  }));
-
   res.json({
     success: true,
-    lockedTables: list,
+    lockedTables: Array.from(lockedTables.entries()).map(([id, data]) => ({
+      tableId: id,
+      lockedBy: data.userName,
+      lockedById: data.userId,
+      lockedAt: data.timestamp
+    })),
+    activeOrders: Array.from(activeOrders.values()),
     usersOnline: userSockets.size,
     totalConnections: io.engine.clientsCount,
   });
 });
 
 // 🚀 Serverni ishga tushirish
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 5009;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server ishga tushdi: http://0.0.0.0:${PORT}`);
 });
