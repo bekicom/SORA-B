@@ -98,7 +98,12 @@ router.post(
   authMiddleware,
   order.printReceipt
 ); // ✅ Redirects to kassir print
-router.post("/:orderId/cancel-item", authMiddleware, order.cancelOrderItem);
+// ORDERS BO‘LIMIDA
+router.post(
+  "/orders/:orderId/cancel-item",
+  authMiddleware,
+  order.cancelOrderItem
+);
 
 // ===== PAYMENTS (YANGI QOSHILDI) =====
 // ✅ TO'G'RI TARTIB: SPECIFIC ROUTES BIRINCHI BO'LISHI KERAK!
