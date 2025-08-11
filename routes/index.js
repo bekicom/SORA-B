@@ -15,7 +15,7 @@ const order = require("../controllers/order.controller");
 const printer = require("../controllers/printer.controller");
 const setting = require("../controllers/settings.controller");
 const client = require("../controllers/clientController");
-const payment = require("../controllers/paymentController"); // ✅ YANGI QOSHILDI
+const payment = require("../controllers/paymentController");
 // ===== AUTH =====
 router.post("/auth/login", auth.login);
 router.post("/auth/register", auth.register);
@@ -65,40 +65,45 @@ router.delete(
   authMiddleware,
   department.deleteDepartment
 );
-// ===== ORDERS =====
+// // ===== ORDERS =====
 router.post("/orders/create", authMiddleware, order.createOrder);
 router.get("/orders/table/:tableId", authMiddleware, order.getOrdersByTable);
 router.put("/orders/status/:orderId", authMiddleware, order.updateOrderStatus);
 router.delete("/orders/delete/:orderId", authMiddleware, order.deleteOrder);
 router.get("/orders/busy-tables", authMiddleware, order.getBusyTables);
 router.get("/orders/my-pending", authMiddleware, order.getMyPendingOrders);
-router.put("/orders/close/:orderId", authMiddleware, order.closeOrder); // ✅ Updated - chek chiqarmaydi
-router.get("/orders/completed", authMiddleware, order.getCompletedOrders); // ✅ Kassir ro'yxati
+router.put("/orders/close/:orderId", authMiddleware, order.closeOrder);
+router.get("/orders/completed", authMiddleware, order.getCompletedOrders);
 router.get(
   "/orders/pending-payments",
   authMiddleware,
   order.getPendingPayments
-); // ✅ To'lov kutilayotganlar
+);
 
 router.post(
   "/orders/kassir-print/:orderId",
   authMiddleware,
   order.printReceiptForKassir
-); // ✅ Kassir chek chiqarish
+);
 router.post(
   "/orders/process-payment/:orderId",
   authMiddleware,
   order.processPayment
-); // ✅ To'lov qabul qilish
-router.get("/orders/daily-sales", authMiddleware, order.getDailySalesSummary); // ✅ Kunlik hisobot
+);
+router.get("/orders/daily-sales", authMiddleware, order.getDailySalesSummary);
 
-// Legacy support (backward compatibility)
+// ✅ YANGI ROUTE — mavjud zakazga qo‘shimcha taom qo‘shish
+router.post(
+  "/orders/:orderId/add-items",
+  authMiddleware,
+  order.addItemsToOrder
+);
+
 router.post(
   "/orders/print-receipt/:orderId",
   authMiddleware,
   order.printReceipt
-); // ✅ Redirects to kassir print
-// ORDERS BO‘LIMIDA
+);
 router.post(
   "/orders/:orderId/cancel-item",
   authMiddleware,
@@ -106,9 +111,7 @@ router.post(
 );
 
 // ===== PAYMENTS (YANGI QOSHILDI) =====
-// ✅ TO'G'RI TARTIB: SPECIFIC ROUTES BIRINCHI BO'LISHI KERAK!
 
-// 1. SPECIFIC ROUTES (birinchi)
 router.get(
   "/payments/daily-stats",
   authMiddleware,

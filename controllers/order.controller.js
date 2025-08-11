@@ -1460,6 +1460,154 @@ const printReceipt = async (req, res) => {
 };
 
 
+// buyurtma qoshish
+// ✅ Mavjud orderga qo‘shimcha taomlar qo‘shish
+const addItemsToOrder = async (req, res) => {
+  const session = await Order.startSession();
+  session.startTransaction();
+
+  try {
+    const { orderId } = req.params;
+    const { items } = req.body; // { food_id, quantity }
+    const userId = req.user?.id;
+
+    if (!items || !Array.isArray(items) || items.length === 0) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: "Kamida bitta taom kerak" });
+    }
+
+    // ✅ Orderni topish
+    const order = await Order.findById(orderId)
+      .populate("table_id")
+      .populate("user_id")
+      .session(session);
+
+    if (!order) {
+      await session.abortTransaction();
+      return res.status(404).json({ message: "Zakaz topilmadi" });
+    }
+
+    if (!["pending", "preparing", "ready", "served"].includes(order.status)) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: "Bu zakazga qo‘shimcha kiritib bo‘lmaydi" });
+    }
+
+    // ✅ Afitsant tekshiruvi
+    if (String(order.user_id._id) !== String(userId) && req.user?.role !== "kassir") {
+      await session.abortTransaction();
+      return res.status(403).json({ message: "Faqat buyurtmani bergan afitsant yoki kassir qo‘shimcha zakaz qo‘shishi mumkin" });
+    }
+
+    const waiter = order.user_id;
+    const tableNumber = order.table_id?.number || order.table_id?.name;
+
+    const newItems = [];
+    let addedTotal = 0;
+
+    for (const item of items) {
+      const { food_id, quantity } = item;
+      const food = await Food.findById(food_id).populate("category").session(session);
+
+      if (!food || food.soni < quantity) {
+        await session.abortTransaction();
+        return res.status(400).json({ message: `Taom yetarli emas: ${food?.name || food_id}` });
+      }
+
+      // Ombordan kamaytirish
+      food.soni -= quantity;
+      await food.save({ session });
+
+      const itemTotal = food.price * quantity;
+      addedTotal += itemTotal;
+
+      // Order ichida mavjud bo‘lsa miqdorini oshirish
+      const existingIndex = order.items.findIndex(i => String(i.food_id) === String(food_id));
+      if (existingIndex !== -1) {
+        order.items[existingIndex].quantity += quantity;
+        order.items[existingIndex].total += itemTotal;
+      } else {
+        order.items.push({
+          food_id,
+          name: food.name,
+          price: food.price,
+          quantity,
+          total: itemTotal,
+          category_name: food.category?.title,
+          printer_id: food.category?.printer_id,
+          printer_ip: food.category?.printer?.ip,
+          printer_name: food.category?.printer?.name
+        });
+      }
+
+      // Printerga yuboriladigan ro‘yxat
+      newItems.push({
+        name: food.name,
+        quantity,
+        price: food.price,
+        total: itemTotal
+      });
+    }
+
+    // ✅ Yangi summalarni hisoblash
+    order.total_price += addedTotal;
+    const serviceAmount = Math.round(order.total_price * (order.waiter_percentage / 100));
+    order.service_amount = serviceAmount;
+    order.final_total = order.total_price + serviceAmount + (order.tax_amount || 0);
+
+    await order.save({ session });
+
+    await session.commitTransaction();
+
+    // ✅ Faqat yangi itemlarni printerga yuborish
+    if (newItems.length > 0) {
+      try {
+        await printToPrinter(order.items[0]?.printer_ip || "192.168.0.106", {
+          items: newItems,
+          table_number: tableNumber,
+          waiter_name: waiter.first_name,
+          date: new Date().toLocaleString("uz-UZ"),
+          order_id: order._id.toString(),
+          order_number: order.formatted_order_number
+        });
+      } catch (printerError) {
+        console.error("❌ Printerga yuborishda xatolik:", printerError);
+      }
+    }
+
+    // ✅ Socket.io orqali yangilash
+    const io = req.app.get("io");
+    if (io) {
+      io.emit("order_items_added", {
+        orderId: order._id,
+        table: { id: order.table_id._id, number: tableNumber },
+        new_items: newItems
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Zakazga qo‘shimcha taomlar qo‘shildi",
+      order_id: order._id,
+      added_items: newItems,
+      new_totals: {
+        subtotal: order.total_price,
+        service_amount: order.service_amount,
+        final_total: order.final_total
+      }
+    });
+
+  } catch (err) {
+    await session.abortTransaction();
+    console.error("❌ Qo‘shimcha zakaz qo‘shishda xatolik:", err);
+    res.status(500).json({
+      success: false,
+      message: "Qo‘shimcha zakaz qo‘shishda xatolik",
+      error: err.message
+    });
+  } finally {
+    await session.endSession();
+  }
+};
 
 
 
@@ -1663,6 +1811,7 @@ module.exports = {
   getOrdersByTable,
   updateOrderStatus,
   deleteOrder,
+  addItemsToOrder,
   getBusyTables,
   getMyPendingOrders,
   closeOrder,
