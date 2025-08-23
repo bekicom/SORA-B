@@ -473,34 +473,84 @@ const createOrder = async (req, res) => {
 
     for (const item of items) {
       const { food_id, quantity } = item;
+
+      // ✅ Quantity ni float qilib parse qilish
+      const parsedQuantity = parseFloat(quantity);
+
+      // ✅ Quantity validatsiya (musbat son ekanligini tekshirish)
+      if (isNaN(parsedQuantity) || parsedQuantity <= 0) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Noto'g'ri miqdor: ${quantity}. Musbat son bo'lishi kerak`,
+        });
+      }
+
       const food = await Food.findById(food_id)
         .populate("category")
         .session(session);
 
-      if (!food || food.soni < quantity || !food.price || food.price <= 0) {
+      if (!food || !food.price || food.price <= 0) {
         await session.abortTransaction();
         return res
           .status(400)
-          .json({ message: `Taomda muammo: ${food?.name || food_id}` });
+          .json({
+            message: `Taom topilmadi yoki narxi noto'g'ri: ${
+              food?.name || food_id
+            }`,
+          });
       }
 
-      food.soni -= quantity;
+      // ✅ Kg asosida sotish uchun miqdor tekshirish
+      if (food.soni < parsedQuantity) {
+        await session.abortTransaction();
+        return res.status(400).json({
+          message: `Yetarli miqdor yo'q. ${food.name} - mavjud: ${food.soni}${
+            food.unit || "dona"
+          }, so'ralgan: ${parsedQuantity}${food.unit || "dona"}`,
+        });
+      }
+
+      // ✅ Miqdorni kamaytirish (decimal/float qiymat bilan)
+      food.soni = Math.round((food.soni - parsedQuantity) * 1000) / 1000; // 3 kasr xonasigacha aniqlik
       await food.save({ session });
 
-      const itemTotal = food.price * quantity;
+      // ✅ Narxni hisoblash (decimal miqdor bilan)
+      const itemTotal = Math.round(food.price * parsedQuantity * 100) / 100;
       calculatedTotal += itemTotal;
 
       updatedItems.push({
         food_id,
         name: food.name,
         price: food.price,
-        quantity,
+        quantity: parsedQuantity, // ✅ Float qiymat saqlanadi
+        unit: food.unit || "dona", // ✅ O'lchov birligini qo'shish
         total: itemTotal,
         category_name: food.category?.title,
         printer_id: food.category?.printer_id,
         printer_ip: food.category?.printer?.ip,
         printer_name: food.category?.printer?.name,
       });
+    }
+
+    // ✅ Hisoblangan jami narx bilan taqqoslash
+    const totalDifference = Math.abs(calculatedTotal - total_price);
+    if (totalDifference > 0.01) {
+      // 1 tiyin farq bo'lsa ham xato
+      console.warn(
+        `⚠️ Narx farqi: hisoblangan=${calculatedTotal}, yuborilgan=${total_price}`
+      );
+      // Hisoblangan narxni ishlatish
+      calculatedTotal = Math.round(calculatedTotal * 100) / 100;
+      const recalculatedServiceAmount =
+        Math.round(calculatedTotal * (waiterPercentage / 100) * 100) / 100;
+      const recalculatedFinalTotal =
+        Math.round(
+          (calculatedTotal + recalculatedServiceAmount + taxAmount) * 100
+        ) / 100;
+
+      // Yangilangan qiymatlarni ishlatish
+      serviceAmount = recalculatedServiceAmount;
+      finalTotal = recalculatedFinalTotal;
     }
 
     // Buyurtma yaratish
@@ -511,7 +561,7 @@ const createOrder = async (req, res) => {
           user_id,
           items: updatedItems,
           table_number: tableNumber,
-          total_price: calculatedTotal,
+          total_price: calculatedTotal, // ✅ Hisoblangan narxni ishlatish
           status: "pending",
           waiter_name: first_name || `${waiter.first_name} ${waiter.last_name}`,
           waiter_percentage: waiterPercentage,
@@ -616,7 +666,6 @@ const createOrder = async (req, res) => {
     await session.endSession();
   }
 };
-
 // Printerga yuborish uchun alohida funksiya
 async function handlePrinting(
   printerGroups,
