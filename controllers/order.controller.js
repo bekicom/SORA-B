@@ -1611,7 +1611,7 @@ const cancelOrderItem = async (req, res) => {
     // ✅ Taomni ombordan topish (kategoriya + printerni ham olib kelamiz)
     const food = await Food.findById(food_id)
       .populate({
-        path: "category_id",
+        path: "category",
         select: "title printer_id",
       })
       .session(session);
@@ -1647,22 +1647,23 @@ const cancelOrderItem = async (req, res) => {
 
     // ✅ Atmen tarixiga qo‘shish (kategoriya/printerni keyin javobga ham beramiz)
     order.cancelled_items = order.cancelled_items || [];
-    order.cancelled_items.push({
-      food_id,
-      name: orderItem.name,
-      price: orderItem.price,
-      cancelled_quantity: cancel_quantity,
-      cancelled_amount: cancelledAmount,
-      reason,
-      notes: notes || null,
-      cancelled_by: userId,
-      cancelled_by_name: userName,
-      cancelled_at: new Date(),
-      // qo'shimcha: kategoriya/printerni audit uchun saqlab qo'yish foydali
-      category_id: food.category_id?._id || null,
-      category_title: food.category_id?.title || null,
-      category_printer_id: food.category_id?.printer_id || null,
-    });
+order.cancelled_items.push({
+  food_id,
+  name: orderItem.name,
+  price: orderItem.price,
+  cancelled_quantity: cancel_quantity,
+  cancelled_amount: cancelledAmount,
+  reason,
+  notes: notes || null,
+  cancelled_by: userId,
+  cancelled_by_name: userName,
+  cancelled_at: new Date(),
+
+  // ✅ To‘g‘ri fieldlar
+  category_id: food.category?._id || null,
+  category_title: food.category?.title || null,
+  category_printer_id: food.category?.printer_id || null,
+});
 
     await order.save({ session });
 
